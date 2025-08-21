@@ -6,6 +6,7 @@ from deepmerge import always_merger
 import argparse
 import os
 import shutil
+import stat
 import sys
 import wget
 import yaml
@@ -25,6 +26,7 @@ def parse_args(cwd):
 	parser.add_argument('-c', '--clean', action='store_true', help='Clean instead of build/install')
 	parser.add_argument('-a', '--assets', default=default_assets_path, help='Path to assets directory')
 	parser.add_argument('-f', '--fresh', action='store_true', help='Fresh build (clear CMake cache)')
+	parser.add_argument('--reacquire', action='store_true', help='Reacquire packages')
 	return parser.parse_args()
 
 def read_settings_file(path):
@@ -53,17 +55,26 @@ def download_package(dep, root, url):
 	wget.download(url, filepath)
 	unpack_into(dep, filepath, make_dep_src_unpack_dir(dep, root))
 
-def download_source_from_url(dep, root):
+def handle_remove_readonly(func, path, exc_info):
+    # remove read-only attribute and retry
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+def download_source_from_url(dep, root, reacquire):
 	url = dep["url"]
 	unpack_dir = make_dep_src_unpack_dir(dep, root)
+	if os.path.exists(unpack_dir) and reacquire:
+		shutil.rmtree(unpack_dir, onerror=handle_remove_readonly)
 	if not os.path.exists(unpack_dir):
 		download_package(dep, root, url)
 	else:
 		print(f"{green(dep['name'])} Skipping download from {cyan(url)} because it already exists in {cyan(unpack_dir)}")
 
-def clone_source_from_git(dep, root):
+def clone_source_from_git(dep, root, reacquire):
 	url = dep["git"]
 	clone_dir = make_dep_src_dir(dep, root)
+	if os.path.exists(clone_dir) and reacquire:
+		shutil.rmtree(clone_dir, onerror=handle_remove_readonly)
 	if not os.path.exists(clone_dir):
 		print(f"{green(dep['name'])} Cloning from {cyan(url)}")
 		repo = Repo.clone_from(url, clone_dir)
@@ -72,9 +83,11 @@ def clone_source_from_git(dep, root):
 	else:
 		print(f"{green(dep['name'])} Skipping clone from {cyan(url)} because it already exists in {cyan(clone_dir)}")
 
-def copy_source_from_path(dep, root):
+def copy_source_from_path(dep, root, reacquire):
 	path = dep["path"]
 	copy_dir = make_dep_src_dir(dep, root)
+	if os.path.exists(copy_dir) and reacquire:
+		shutil.rmtree(copy_dir, onerror=handle_remove_readonly)
 	if not os.path.exists(copy_dir):
 		print(f"{green(dep['name'])} Copying from {cyan(path)}")
 		shutil.copytree(path, copy_dir)
@@ -89,13 +102,13 @@ def add_src_files(dep, root, assets_dir):
 		print(f"{green(dep['name'])} Adding {cyan(dst_file)}")
 		shutil.copy(os.path.join(src_add_dir, file), dst_file)
 
-def get_source(dep, root, assets_dir):
+def get_source(dep, root, assets_dir, reacquire):
 	if "url" in dep:
-		download_source_from_url(dep, root)
+		download_source_from_url(dep, root, reacquire)
 	elif "git" in dep:
-		clone_source_from_git(dep, root)
+		clone_source_from_git(dep, root, reacquire)
 	elif "path" in dep:
-		copy_source_from_path(dep, root)
+		copy_source_from_path(dep, root, reacquire)
 	if "add-src-files" in dep and dep["add-src-files"]:
 		add_src_files(dep, root, assets_dir)
 
@@ -164,17 +177,17 @@ def install_dep(dep, root, assets_dir, settings, clean, fresh, verbose):
 	elif dep["build-type"] == "py":
 		run_script(dep, root, assets_dir, clean, verbose)
 
-def install_one_dep(name, deps, root, assets_dir, settings, clean, fresh, verbose):
+def install_one_dep(name, deps, root, assets_dir, settings, clean, fresh, reacquire, verbose):
 	dep = next((d for d in deps if d["name"] == name), None)
 	if not dep:
 		print(f"{red(name)} not found")
 		return
-	get_source(dep, root, assets_dir)
+	get_source(dep, root, assets_dir, reacquire)
 	install_dep(dep, root, assets_dir, settings, clean, fresh, verbose)
 
-def install_all_deps(deps, root, assets_dir, settings, clean, fresh, verbose):
+def install_all_deps(deps, root, assets_dir, settings, clean, fresh, reacquire, verbose):
 	for dep in deps:
-		get_source(dep, root, assets_dir)
+		get_source(dep, root, assets_dir, reacquire)
 		install_dep(dep, root, assets_dir, settings, clean, fresh, verbose)
 
 def get_platform_settings_file_path(assets_dir):
@@ -211,9 +224,9 @@ def main():
 	deps_file = os.path.join(args.assets, DEPS_YML)
 	deps      = read_deps_file(deps_file)
 	if args.dep:
-		install_one_dep(args.dep, deps, args.root, args.assets, settings, args.clean, args.fresh, args.verbose)
+		install_one_dep(args.dep, deps, args.root, args.assets, settings, args.clean, args.fresh, args.reacquire, args.verbose)
 	else:
-		install_all_deps(deps, args.root, args.assets, settings, args.clean, args.fresh, args.verbose)
+		install_all_deps(deps, args.root, args.assets, settings, args.clean, args.fresh, args.reacquire, args.verbose)
 
 if __name__ == "__main__":
 	main()
