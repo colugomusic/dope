@@ -18,7 +18,7 @@ SETTINGS_MAC_YML = "settings-mac.yml"
 
 def parse_args(cwd):
 	default_assets_path = cwd
-	parser = argparse.ArgumentParser(description='Build/Install Blockhead dependencies')
+	parser = argparse.ArgumentParser(description='Build/Install dependencies')
 	parser.add_argument('-r', '--root', required=True, help='Where to build/install dependencies')
 	parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
 	parser.add_argument('-1', '--dep', help='Build/Install a specific dependency')
