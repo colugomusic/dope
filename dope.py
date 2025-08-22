@@ -152,12 +152,14 @@ def should_reacquire(dep, options:DopeOptions):
 		return True
 	if options.reacquire1:
 		return dep["name"] in options.reacquire1
+	return False
 
 def should_reinstall(dep, options:DopeOptions):
 	if options.reinstall:
 		return True
 	if options.reinstall1:
 		return dep["name"] in options.reinstall1
+	return should_reacquire(dep, options)
 
 def download_source_from_url(dep, options:DopeOptions):
 	url = dep["url"]
