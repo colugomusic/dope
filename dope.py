@@ -4,6 +4,7 @@ from deepmerge import always_merger
 from git import Repo
 from pathlib import Path
 from dataclasses import dataclass
+import cgi
 import argparse
 import os
 import os
@@ -12,7 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-import wget
+import requests
 import yaml
 
 DEPS_YML         = "deps.yml"
@@ -133,19 +134,34 @@ def unpack_into(dep, filepath, target_dir, options:DopeOptions):
 	os.makedirs(target_dir, exist_ok=True)
 	shutil.unpack_archive(filepath, target_dir)
 
+def download(url, out_dir="."):
+    r = requests.get(url, allow_redirects=True, stream=True)
+    r.raise_for_status()
+    cd = r.headers.get("Content-Disposition")
+    filename = None
+    if cd:
+        _, params = cgi.parse_header(cd)
+        filename = params.get("filename")
+    if not filename:
+        filename = os.path.basename(r.url.split("?")[0]) or "downloaded.file"
+    filepath = os.path.join(out_dir, filename)
+    with open(filepath, "wb") as f:
+        for chunk in r.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+    return filepath
+
 def download_package(dep, url:str, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} Downloading from {cyan(dep['url'])}")
 	dep_pkg_dir = os.path.join(make_pkg_dir(options.root), dep["name"])
 	os.makedirs(dep_pkg_dir, exist_ok=True)
-	filename = os.path.basename(url)
-	filepath = os.path.join(dep_pkg_dir, filename)
-	wget.download(url, filepath, bar=None)
+	filepath = download(url, dep_pkg_dir)
 	unpack_into(dep, filepath, make_dep_src_unpack_dir(dep, options.root), options)
 
 def handle_remove_readonly(func, path, exc_info):
-    # remove read-only attribute and retry
-    os.chmod(path, stat.S_IWRITE)
-    func(path)
+	# remove read-only attribute and retry
+	os.chmod(path, stat.S_IWRITE)
+	func(path)
 
 def should_reacquire(dep, options:DopeOptions):
 	if options.reacquire:
@@ -213,13 +229,23 @@ def get_source(dep, options:DopeOptions):
 	if "add-src-files" in dep and dep["add-src-files"]:
 		add_src_files(dep, options)
 
-def make_global_cmake_options(options:DopeOptions):
+def translate_special_vars(string:str, options:DopeOptions):
+	string = string.replace("__dope_root__",       options.root)
+	string = string.replace("__dope_on_linux__",   "ON" if sys.platform == "linux" else "OFF")
+	string = string.replace("__dope_on_macos__",   "ON" if sys.platform == "darwin" else "OFF")
+	string = string.replace("__dope_on_windows__", "ON" if sys.platform == "win32" else "OFF")
+	return string
+
+def get_untranslated_cmake_options(options:DopeOptions):
 	# CMake options passed in as a command line argument take
 	# precedence over the options in the settings file.
 	if options.cmake_options != "":
 		return options.cmake_options
 	else:
 		return " ".join(options.settings["cmake-options"])
+
+def make_global_cmake_options(options:DopeOptions):
+	return translate_special_vars(get_untranslated_cmake_options(options), options)
 
 def cmake_configure(dep, config, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Configure")
@@ -282,6 +308,8 @@ def run_script(dep, options:DopeOptions):
 	run_with_env(cmd, env, options.verbose)
 
 def install_dep(dep, options:DopeOptions):
+	if "build-type" not in dep:
+		return
 	if dep["build-type"] == "cmake":
 		run_cmake(dep, options)
 	elif dep["build-type"] == "py":
