@@ -240,6 +240,7 @@ def cmake_configure(dep, config, options:DopeOptions):
 	cmake_cmd += f' -S "{make_dep_src_dir(dep, options.root)}"'
 	cmake_cmd += f' --install-prefix "{make_install_dir(options.root)}"'
 	cmake_cmd += f' -DCMAKE_PREFIX_PATH="{make_install_dir(options.root)}"'
+	cmake_cmd += f' -DCMAKE_BUILD_TYPE={config}'
 	cmake_cmd += f' {make_global_cmake_options(options)}'
 	if options.fresh:
 		cmake_cmd += ' --fresh'
