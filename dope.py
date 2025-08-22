@@ -4,7 +4,6 @@ from deepmerge import always_merger
 from git import Repo
 from pathlib import Path
 from dataclasses import dataclass
-import cgi
 import argparse
 import os
 import os
@@ -15,6 +14,7 @@ import sys
 import tempfile
 import requests
 import yaml
+import wget
 
 DEPS_YML         = "deps.yml"
 SETTINGS_YML     = "settings.yml"
@@ -134,28 +134,13 @@ def unpack_into(dep, filepath, target_dir, options:DopeOptions):
 	os.makedirs(target_dir, exist_ok=True)
 	shutil.unpack_archive(filepath, target_dir)
 
-def download(url, out_dir="."):
-    r = requests.get(url, allow_redirects=True, stream=True)
-    r.raise_for_status()
-    cd = r.headers.get("Content-Disposition")
-    filename = None
-    if cd:
-        _, params = cgi.parse_header(cd)
-        filename = params.get("filename")
-    if not filename:
-        filename = os.path.basename(r.url.split("?")[0]) or "downloaded.file"
-    filepath = os.path.join(out_dir, filename)
-    with open(filepath, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-    return filepath
-
 def download_package(dep, url:str, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} Downloading from {cyan(dep['url'])}")
 	dep_pkg_dir = os.path.join(make_pkg_dir(options.root), dep["name"])
 	os.makedirs(dep_pkg_dir, exist_ok=True)
-	filepath = download(url, dep_pkg_dir)
+	filename = os.path.basename(url)
+	filepath = os.path.join(dep_pkg_dir, filename)
+	wget.download(url, filepath, bar=None)
 	unpack_into(dep, filepath, make_dep_src_unpack_dir(dep, options.root), options)
 
 def handle_remove_readonly(func, path, exc_info):
