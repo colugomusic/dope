@@ -225,7 +225,10 @@ def get_untranslated_cmake_options(options:DopeOptions):
 	if options.cmake_options != "":
 		return options.cmake_options
 	else:
-		return " ".join(options.settings["cmake-options"])
+		if "cmake-options" in options.settings:
+			return " ".join(options.settings["cmake-options"])
+		else:
+			return ""
 
 def make_global_cmake_options(options:DopeOptions):
 	return translate_special_vars(get_untranslated_cmake_options(options), options)
