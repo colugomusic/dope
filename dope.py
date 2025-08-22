@@ -6,13 +6,11 @@ from pathlib import Path
 from dataclasses import dataclass
 import argparse
 import os
-import os
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
-import requests
 import yaml
 import wget
 
