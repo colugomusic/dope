@@ -175,15 +175,15 @@ def handle_remove_readonly(func, path, exc_info):
 def should_reacquire(dep, options:DopeOptions):
 	if options.reacquire:
 		return True
-	if options.reacquire1:
-		return dep["name"] in options.reacquire1
+	if options.reacquire1 and dep["name"] in options.reacquire1:
+		return True
 	return False
 
 def should_reinstall(dep, options:DopeOptions):
 	if options.reinstall:
 		return True
-	if options.reinstall1:
-		return dep["name"] in options.reinstall1
+	if options.reinstall1 and dep["name"] in options.reinstall1:
+		return True
 	return should_reacquire(dep, options)
 
 def download_source_from_url(dep, options:DopeOptions):
