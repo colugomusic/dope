@@ -88,17 +88,30 @@ def get_version_from_url(url:str):
     match = re.search(r'(\d+(?:\.\d+)*(?:[A-Za-z0-9\-_]*)?)$', name)
     return match.group(1) if match else None
 
+def get_filename_without_extension_from_url(url:str):
+	path = urlparse(url).path
+	filename = path.split("/")[-1]
+	return filename.rpartition(".")[0]
+
+def get_subdirs_to_try(dep:Dependency, unpack_dir:str):
+	version                    = get_version_from_url(dep.url)
+	filename_without_extension = get_filename_without_extension_from_url(dep.url)
+	subdirs = []
+	if version:
+		subdirs.append(os.path.join(unpack_dir, dep.name + "-" + version))
+	if filename_without_extension:
+		subdirs.append(os.path.join(unpack_dir, dep.name + "-" + filename_without_extension))
+	return subdirs
+
 def make_dep_src_dir(dep:Dependency, root):
 	unpack_dir = make_dep_src_unpack_dir(dep, root)
 	if dep.url:
 		if dep.src_subdir:
 			return os.path.join(unpack_dir, dep.src_subdir)
-		version = get_version_from_url(dep.url)
-		if version is None:
-			return unpack_dir
-		try_dir = os.path.join(unpack_dir, dep.name + "-" + version)
-		if os.path.exists(try_dir):
-			return try_dir
+		subdirs = get_subdirs_to_try(dep, unpack_dir)
+		for subdir in subdirs:
+			if os.path.exists(subdir):
+				return subdir
 	return unpack_dir
 
 def make_dep_script_path(dep:Dependency, assets_dir):
