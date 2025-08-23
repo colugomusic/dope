@@ -1,1 +1,3 @@
 *.pyc
+/dope.egg-info
+/build

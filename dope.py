@@ -74,6 +74,9 @@ def make_dep_script_path(dep, assets_dir):
 def make_dep_src_add_dir(dep, assets_dir):
 	return os.path.join(assets_dir, dep["name"], "src")
 
+def make_pkg_check_dir(root):
+	return os.path.join(root, "pkg-check")
+
 def run(cmd, verbose, check=True):
 	if verbose:
 		return subprocess.run(cmd, check=check, shell=True)
@@ -103,7 +106,7 @@ def parse_args(cwd):
 	parser = argparse.ArgumentParser(description='Build/Install dependencies')
 	parser.add_argument('-r', '--root', required=True, help='Where to build/install dependencies')
 	parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
-	parser.add_argument('-1', '--dep', help='Build/Install a specific dependency')
+	parser.add_argument('-1', '--dep', action='append', help='Build/Install a specific dependency')
 	parser.add_argument('-c', '--clean', action='store_true', help='Clean instead of build/install')
 	parser.add_argument('-a', '--assets', default=default_assets_path, help='Path to assets directory')
 	parser.add_argument('-f', '--fresh', action='store_true', help='Fresh build (clear CMake cache)')
@@ -303,16 +306,19 @@ def install_dep(dep, options:DopeOptions):
 		run_script(dep, options)
 
 def have_package(dep, options:DopeOptions):
+	# NOTE: i'm aware that CMake has a --find-package option but apparently
+	# its usage is not recommended.
+	pkg_check_dir = make_pkg_check_dir(options.root)
+	os.makedirs(pkg_check_dir, exist_ok=True)
 	find_package_name = dep.get("find-package-name", dep["name"])
-	with tempfile.TemporaryDirectory() as temp_dir:
-		cmake_lists = os.path.join(temp_dir, "CMakeLists.txt")
-		with open(cmake_lists, "w") as f:
-			f.write(f'cmake_minimum_required(VERSION 3.30)\n')
-			f.write(f'project(dope-package-find-test NONE)\n')
-			f.write(f'find_package({find_package_name} REQUIRED CONFIG)\n')
-		cmake_cmd = f'cmake -B "{temp_dir}" -S "{temp_dir}" -DCMAKE_PREFIX_PATH="{make_install_dir(options.root)}"'
-		result = run(cmake_cmd, options.verbose, check=False)
-		return result.returncode == 0
+	cmake_lists = os.path.join(pkg_check_dir, "CMakeLists.txt")
+	with open(cmake_lists, "w") as f:
+		f.write(f'cmake_minimum_required(VERSION 3.30)\n')
+		f.write(f'project(dope-package-find-test CXX)\n')
+		f.write(f'find_package({find_package_name} REQUIRED CONFIG)\n')
+	cmake_cmd = f'cmake -B "{pkg_check_dir}" -S "{pkg_check_dir}" -DCMAKE_PREFIX_PATH="{make_install_dir(options.root)}"'
+	result = run(cmake_cmd, options.verbose, check=False)
+	return result.returncode == 0
 
 def run_dope_if_present(dep, options:DopeOptions):
 	src_dir = make_dep_src_dir(dep, options.root)
@@ -341,10 +347,20 @@ def run_dope_if_present(dep, options:DopeOptions):
 				cmd += f' --reinstall1 {dep}'
 		run(cmd, verbose=True)
 
-def install_one_dep(name, deps, options:DopeOptions):
+def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
+	merged = []
+	if names:
+		merged.extend(names)
+	if reinstall:
+		merged.extend(reinstall)
+	if reacquire:
+		merged.extend(reacquire)
+	merged = list(set(merged))
+	return merged
+
+def install_one_dep(name:str, deps, options:DopeOptions):
 	dep = next((d for d in deps if d["name"] == name), None)
 	if not dep:
-		print(f"{red(make_dep_print_prefix(dep, options))} not found")
 		return
 	if not should_reinstall(dep, options) and have_package(dep, options):
 		print(f"{green(make_dep_print_prefix(dep, options))} already installed")
@@ -352,6 +368,10 @@ def install_one_dep(name, deps, options:DopeOptions):
 	get_source(dep, options)
 	run_dope_if_present(dep, options)
 	install_dep(dep, options)
+
+def install_these_deps(names:list[str], deps, options:DopeOptions):
+	for name in names:
+		install_one_dep(name, deps, options)
 
 def install_all_deps(deps, options:DopeOptions):
 	for dep in deps:
@@ -388,15 +408,23 @@ def get_settings(assets_dir):
 		combined_settings = always_merger.merge(combined_settings, platform_settings)
 	return combined_settings
 
+def find_assets_dir(assets_arg:str):
+	if os.path.exists(os.path.join(assets_arg, DEPS_YML)):
+		return assets_arg
+	if os.path.exists(os.path.join(assets_arg, "dope", DEPS_YML)):
+		return os.path.join(assets_arg, "dope")
+	raise FileNotFoundError(f"Assets directory not found in {assets_arg}")
+
 def main():
 	colorama_init()
-	cwd       = os.getcwd()
-	args      = parse_args(cwd)
-	settings  = get_settings(args.assets)
-	deps_file = os.path.join(args.assets, DEPS_YML)
-	deps      = read_deps_file(deps_file)
+	cwd        = os.getcwd()
+	args       = parse_args(cwd)
+	assets_dir = find_assets_dir(args.assets)
+	settings   = get_settings(assets_dir)
+	deps_file  = os.path.join(assets_dir, DEPS_YML)
+	deps       = read_deps_file(deps_file)
 	dope_options = DopeOptions(
-		assets=args.assets,
+		assets=assets_dir,
 		clean=args.clean,
 		cmake_options=args.cmake_options,
 		fresh=args.fresh,
@@ -412,8 +440,9 @@ def main():
 	if deps is None:
 		print(f'{green(make_print_prefix(dope_options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
 		return
-	if args.dep:
-		install_one_dep(args.dep, deps, dope_options)
+	if args.dep or dope_options.reacquire1 or dope_options.reinstall1:
+		names = merge_dep_lists(args.dep, dope_options.reinstall1, dope_options.reacquire1)
+		install_these_deps(names, deps, dope_options)
 	else:
 		install_all_deps(deps, dope_options)
 
