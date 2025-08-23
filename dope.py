@@ -1,18 +1,20 @@
 from colorama import Fore, Style
 from colorama import init as colorama_init
+from dataclasses import dataclass
 from deepmerge import always_merger
 from git import Repo
 from pathlib import Path
-from dataclasses import dataclass
+from urllib.parse import urlparse
+from hashlib import md5
 import argparse
 import os
+import re
 import shutil
 import stat
 import subprocess
 import sys
-import tempfile
-import yaml
 import wget
+import yaml
 
 DEPS_YML         = "deps.yml"
 SETTINGS_YML     = "settings.yml"
@@ -62,11 +64,25 @@ def make_dep_build_dir(dep, config, root):
 def make_dep_src_unpack_dir(dep, root):
 	return os.path.join(make_src_dir(root), dep["name"])
 
+def get_version_from_url(url:str):
+    path = urlparse(url).path
+    filename = path.split("/")[-1]
+    name, _, _ = filename.rpartition(".")
+    match = re.search(r'(\d+(?:\.\d+)*(?:[A-Za-z0-9\-_]*)?)$', name)
+    return match.group(1) if match else None
+
 def make_dep_src_dir(dep, root):
-	if "src_subdir" in dep:
-		return os.path.join(make_dep_src_unpack_dir(dep, root), dep["src_subdir"])
-	else:
-		return make_dep_src_unpack_dir(dep, root)
+	unpack_dir = make_dep_src_unpack_dir(dep, root)
+	if "url" in dep:
+		if "src_subdir" in dep:
+			return os.path.join(unpack_dir, dep["src_subdir"])
+		version = get_version_from_url(dep["url"])
+		if version is None:
+			return unpack_dir
+		try_dir = os.path.join(unpack_dir, dep["name"] + "-" + version)
+		if os.path.exists(try_dir):
+			return try_dir
+	return unpack_dir
 
 def make_dep_script_path(dep, assets_dir):
 	return os.path.join(assets_dir, dep["name"], "install.py")
@@ -135,6 +151,11 @@ def unpack_into(dep, filepath, target_dir, options:DopeOptions):
 	os.makedirs(target_dir, exist_ok=True)
 	shutil.unpack_archive(filepath, target_dir)
 
+def check_file_md5(filepath:str, md5_str:str):
+	md5_hash = md5(open(filepath, "rb").read()).hexdigest()
+	if md5_hash != md5_str:
+		raise ValueError(f"MD5 checksum mismatch for {filepath}. Expected {md5_str}, got {md5_hash}")
+
 def download_package(dep, url:str, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} Downloading from {cyan(dep['url'])}")
 	dep_pkg_dir = os.path.join(make_pkg_dir(options.root), dep["name"])
@@ -142,6 +163,8 @@ def download_package(dep, url:str, options:DopeOptions):
 	filename = os.path.basename(url)
 	filepath = os.path.join(dep_pkg_dir, filename)
 	wget.download(url, filepath, bar=None)
+	if dep["md5"]:
+		check_file_md5(filepath, dep["md5"])
 	unpack_into(dep, filepath, make_dep_src_unpack_dir(dep, options.root), options)
 
 def handle_remove_readonly(func, path, exc_info):
@@ -238,6 +261,13 @@ def make_global_cmake_options(options:DopeOptions):
 
 def cmake_configure(dep, config, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Configure")
+	src_dir = make_dep_src_dir(dep, options.root)
+	expected_cmake_lists = os.path.join(src_dir, "CMakeLists.txt")
+	if not os.path.exists(expected_cmake_lists):
+		if "url" in dep:
+			raise FileNotFoundError(f"{expected_cmake_lists} not found. You may need to provide the 'src_subdir' option for this dependency, depending on the structure of the package archive.")
+		else:
+			raise FileNotFoundError(f"{expected_cmake_lists} not found.")
 	cmake_cmd = 'cmake'
 	cmake_cmd += f' -B "{make_dep_build_dir(dep, config, options.root)}"'
 	cmake_cmd += f' -S "{make_dep_src_dir(dep, options.root)}"'
@@ -440,11 +470,15 @@ def main():
 	if deps is None:
 		print(f'{green(make_print_prefix(dope_options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
 		return
-	if args.dep or dope_options.reacquire1 or dope_options.reinstall1:
-		names = merge_dep_lists(args.dep, dope_options.reinstall1, dope_options.reacquire1)
-		install_these_deps(names, deps, dope_options)
-	else:
-		install_all_deps(deps, dope_options)
+	try:
+		if args.dep or dope_options.reacquire1 or dope_options.reinstall1:
+			names = merge_dep_lists(args.dep, dope_options.reinstall1, dope_options.reacquire1)
+			install_these_deps(names, deps, dope_options)
+		else:
+			install_all_deps(deps, dope_options)
+	except Exception as e:
+		print(f'{red(make_print_prefix(dope_options))} {red(f"Error: {e}")}')
+		sys.exit(1)
 
 if __name__ == "__main__":
 	main()
