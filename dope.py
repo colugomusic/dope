@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import traceback
 import wget
 import yaml
 
@@ -23,16 +24,32 @@ SETTINGS_LIN_YML = "settings-lin.yml"
 SETTINGS_MAC_YML = "settings-mac.yml"
 
 @dataclass
+class Dependency:
+	name: str
+	url: str
+	git: str
+	tag: str
+	path: str
+	build_type: str
+	cmake_options: str
+	cmake_options_mac: str
+	cmake_options_lin: str
+	cmake_options_win: str
+	md5: str
+	find_package_name: str
+	src_subdir: str
+	add_src_files: bool
+
+@dataclass
 class DopeOptions:
 	assets: str
 	clean: bool
 	cmake_options: str
+	config: list[str]
 	fresh: bool
 	project_name: str
-	reacquire: bool
-	reinstall: bool
-	reacquire1: list[str]
-	reinstall1: list[str]
+	reacquire: list[str]
+	reinstall: list[str]
 	root: str
 	settings: dict
 	verbose: bool
@@ -40,11 +57,11 @@ class DopeOptions:
 def make_print_prefix(options:DopeOptions):
 	return f'{options.project_name}'
 
-def make_dep_print_prefix(dep, options:DopeOptions):
+def make_dep_print_prefix(dep:Dependency, options:DopeOptions):
 	if options.project_name != "":
-		return f'{options.project_name} -> {dep["name"]}'
+		return f'{options.project_name} -> {dep.name}'
 	else:
-		return f'{dep["name"]}'
+		return f'{dep.name}'
 
 def make_build_dir(config, root):
 	return os.path.join(root, "build", config)
@@ -58,11 +75,11 @@ def make_src_dir(root):
 def make_pkg_dir(root):
 	return os.path.join(root, "pkg")
 
-def make_dep_build_dir(dep, config, root):
-	return os.path.join(make_build_dir(config, root), dep["name"])
+def make_dep_build_dir(dep:Dependency, config, root):
+	return os.path.join(make_build_dir(config, root), dep.name)
 
-def make_dep_src_unpack_dir(dep, root):
-	return os.path.join(make_src_dir(root), dep["name"])
+def make_dep_src_unpack_dir(dep:Dependency, root):
+	return os.path.join(make_src_dir(root), dep.name)
 
 def get_version_from_url(url:str):
     path = urlparse(url).path
@@ -71,24 +88,24 @@ def get_version_from_url(url:str):
     match = re.search(r'(\d+(?:\.\d+)*(?:[A-Za-z0-9\-_]*)?)$', name)
     return match.group(1) if match else None
 
-def make_dep_src_dir(dep, root):
+def make_dep_src_dir(dep:Dependency, root):
 	unpack_dir = make_dep_src_unpack_dir(dep, root)
-	if "url" in dep:
-		if "src_subdir" in dep:
-			return os.path.join(unpack_dir, dep["src_subdir"])
-		version = get_version_from_url(dep["url"])
+	if dep.url:
+		if dep.src_subdir:
+			return os.path.join(unpack_dir, dep.src_subdir)
+		version = get_version_from_url(dep.url)
 		if version is None:
 			return unpack_dir
-		try_dir = os.path.join(unpack_dir, dep["name"] + "-" + version)
+		try_dir = os.path.join(unpack_dir, dep.name + "-" + version)
 		if os.path.exists(try_dir):
 			return try_dir
 	return unpack_dir
 
-def make_dep_script_path(dep, assets_dir):
-	return os.path.join(assets_dir, dep["name"], "install.py")
+def make_dep_script_path(dep:Dependency, assets_dir):
+	return os.path.join(assets_dir, dep.name, "install.py")
 
-def make_dep_src_add_dir(dep, assets_dir):
-	return os.path.join(assets_dir, dep["name"], "src")
+def make_dep_src_add_dir(dep:Dependency, assets_dir):
+	return os.path.join(assets_dir, dep.name, "src")
 
 def make_pkg_check_dir(root):
 	return os.path.join(root, "pkg-check")
@@ -126,12 +143,11 @@ def parse_args(cwd):
 	parser.add_argument('-c', '--clean', action='store_true', help='Clean instead of build/install')
 	parser.add_argument('-a', '--assets', default=default_assets_path, help='Path to assets directory')
 	parser.add_argument('-f', '--fresh', action='store_true', help='Fresh build (clear CMake cache)')
+	parser.add_argument('--config', action='append', help='Configuration to install (default: Debug + Release)')
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
 	parser.add_argument('--cmake-options', type=str, default="", help='Additional CMake options')
-	parser.add_argument('--reinstall', action='store_true', help='Reinstall packages')
-	parser.add_argument('--reacquire', action='store_true', help='Reacquire packages')
-	parser.add_argument('--reacquire1', action='append', help='Reacquire a specific dependency')
-	parser.add_argument('--reinstall1', action='append', help='Reinstall a specific dependency')
+	parser.add_argument('--reacquire', action='append', help='Reacquire a specific dependency, or "*" for all')
+	parser.add_argument('--reinstall', action='append', help='Reinstall a specific dependency, or "*" for all')
 	return parser.parse_args()
 
 def read_settings_file(path):
@@ -146,7 +162,7 @@ def read_deps_file(path):
 	with open(path, "r") as f:
 		return yaml.safe_load(f)
 
-def unpack_into(dep, filepath, target_dir, options:DopeOptions):
+def unpack_into(dep:Dependency, filepath, target_dir, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} Unpacking {cyan(filepath)} into {cyan(target_dir)}")
 	os.makedirs(target_dir, exist_ok=True)
 	shutil.unpack_archive(filepath, target_dir)
@@ -156,15 +172,15 @@ def check_file_md5(filepath:str, md5_str:str):
 	if md5_hash != md5_str:
 		raise ValueError(f"MD5 checksum mismatch for {filepath}. Expected {md5_str}, got {md5_hash}")
 
-def download_package(dep, url:str, options:DopeOptions):
-	print(f"{green(make_dep_print_prefix(dep, options))} Downloading from {cyan(dep['url'])}")
-	dep_pkg_dir = os.path.join(make_pkg_dir(options.root), dep["name"])
+def download_package(dep:Dependency, url:str, options:DopeOptions):
+	print(f"{green(make_dep_print_prefix(dep, options))} Downloading from {cyan(dep.url)}")
+	dep_pkg_dir = os.path.join(make_pkg_dir(options.root), dep.name)
 	os.makedirs(dep_pkg_dir, exist_ok=True)
 	filename = os.path.basename(url)
 	filepath = os.path.join(dep_pkg_dir, filename)
 	wget.download(url, filepath, bar=None)
-	if dep["md5"]:
-		check_file_md5(filepath, dep["md5"])
+	if dep.md5:
+		check_file_md5(filepath, dep.md5)
 	unpack_into(dep, filepath, make_dep_src_unpack_dir(dep, options.root), options)
 
 def handle_remove_readonly(func, path, exc_info):
@@ -172,55 +188,45 @@ def handle_remove_readonly(func, path, exc_info):
 	os.chmod(path, stat.S_IWRITE)
 	func(path)
 
-def should_reacquire(dep, options:DopeOptions):
-	if options.reacquire:
-		return True
-	if options.reacquire1 and dep["name"] in options.reacquire1:
-		return True
-	return False
+def should_reacquire(dep:Dependency, options:DopeOptions):
+	return "*" in options.reacquire or dep.name in options.reacquire
 
-def should_reinstall(dep, options:DopeOptions):
-	if options.reinstall:
-		return True
-	if options.reinstall1 and dep["name"] in options.reinstall1:
-		return True
-	return should_reacquire(dep, options)
+def should_reinstall(dep:Dependency, options:DopeOptions):
+	return "*" in options.reinstall or dep.name in options.reinstall or should_reacquire(dep, options)
 
 def download_source_from_url(dep, options:DopeOptions):
-	url = dep["url"]
 	unpack_dir = make_dep_src_unpack_dir(dep, options.root)
 	if os.path.exists(unpack_dir) and should_reacquire(dep, options):
 		shutil.rmtree(unpack_dir, onerror=handle_remove_readonly)
 	if not os.path.exists(unpack_dir):
-		download_package(dep, url, options)
+		download_package(dep, dep.url, options)
 	else:
-		print(f"{green(make_dep_print_prefix(dep, options))} Skipping download from {cyan(url)} because it already exists in {cyan(unpack_dir)}")
+		print(f"{green(make_dep_print_prefix(dep, options))} Skipping download from {cyan(dep.url)} because it already exists in {cyan(unpack_dir)}")
 
-def clone_source_from_git(dep, options:DopeOptions):
-	url = dep["git"]
+def clone_source_from_git(dep:Dependency, options:DopeOptions):
+	url = dep.git
 	clone_dir = make_dep_src_dir(dep, options.root)
 	if os.path.exists(clone_dir) and should_reacquire(dep, options):
 		shutil.rmtree(clone_dir, onerror=handle_remove_readonly)
 	if not os.path.exists(clone_dir):
 		print(f"{green(make_dep_print_prefix(dep, options))} Cloning from {cyan(url)}")
 		repo = Repo.clone_from(url, clone_dir)
-		if "tag" in dep:
-			repo.git.checkout(dep["tag"])
+		if dep.tag:
+			repo.git.checkout(dep.tag)
 	else:
 		print(f"{green(make_dep_print_prefix(dep, options))} Skipping clone from {cyan(url)} because it already exists in {cyan(clone_dir)}")
 
-def copy_source_from_path(dep, options:DopeOptions):
-	path = dep["path"]
+def copy_source_from_path(dep:Dependency, options:DopeOptions):
 	copy_dir = make_dep_src_dir(dep, options.root)
 	if os.path.exists(copy_dir) and should_reacquire(dep, options):
 		shutil.rmtree(copy_dir, onerror=handle_remove_readonly)
 	if not os.path.exists(copy_dir):
-		print(f"{green(make_dep_print_prefix(dep, options))} Copying from {cyan(path)}")
-		shutil.copytree(path, copy_dir)
+		print(f"{green(make_dep_print_prefix(dep, options))} Copying from {cyan(dep.path)}")
+		shutil.copytree(dep.path, copy_dir)
 	else:
-		print(f"{green(make_dep_print_prefix(dep, options))} Skipping copy from {cyan(path)} because it already exists in {cyan(copy_dir)}")
+		print(f"{green(make_dep_print_prefix(dep, options))} Skipping copy from {cyan(dep.path)} because it already exists in {cyan(copy_dir)}")
 
-def add_src_files(dep, options:DopeOptions):
+def add_src_files(dep:Dependency, options:DopeOptions):
 	src_add_dir = make_dep_src_add_dir(dep, options.assets)
 	src_dst_dir = make_dep_src_dir(dep, options.root)
 	for file in os.listdir(src_add_dir):
@@ -228,14 +234,14 @@ def add_src_files(dep, options:DopeOptions):
 		print(f"{green(make_dep_print_prefix(dep, options))} Adding {cyan(dst_file)}")
 		shutil.copy(os.path.join(src_add_dir, file), dst_file)
 
-def get_source(dep, options:DopeOptions):
-	if "url" in dep:
+def get_source(dep:Dependency, options:DopeOptions):
+	if dep.url:
 		download_source_from_url(dep, options)
-	elif "git" in dep:
+	elif dep.git:
 		clone_source_from_git(dep, options)
-	elif "path" in dep:
+	elif dep.path:
 		copy_source_from_path(dep, options)
-	if "add-src-files" in dep and dep["add-src-files"]:
+	if dep.add_src_files:
 		add_src_files(dep, options)
 
 def translate_special_vars(string:str, options:DopeOptions):
@@ -259,12 +265,12 @@ def get_untranslated_cmake_options(options:DopeOptions):
 def make_global_cmake_options(options:DopeOptions):
 	return translate_special_vars(get_untranslated_cmake_options(options), options)
 
-def cmake_configure(dep, config, options:DopeOptions):
+def cmake_configure(dep:Dependency, config, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Configure")
 	src_dir = make_dep_src_dir(dep, options.root)
 	expected_cmake_lists = os.path.join(src_dir, "CMakeLists.txt")
 	if not os.path.exists(expected_cmake_lists):
-		if "url" in dep:
+		if dep.url:
 			raise FileNotFoundError(f"{expected_cmake_lists} not found. You may need to provide the 'src_subdir' option for this dependency, depending on the structure of the package archive.")
 		else:
 			raise FileNotFoundError(f"{expected_cmake_lists} not found.")
@@ -278,29 +284,29 @@ def cmake_configure(dep, config, options:DopeOptions):
 	if options.fresh:
 		cmake_cmd += ' --fresh'
 	# Dependency-specific CMake options
-	if "cmake-options" in dep:
-		cmake_cmd += f" {dep['cmake-options']}"
-	if sys.platform == "darwin" and "cmake-options-mac" in dep:
-		cmake_cmd += f" {dep['cmake-options-mac']}"
-	elif sys.platform == "linux" and "cmake-options-lin" in dep:
-		cmake_cmd += f" {dep['cmake-options-lin']}"
-	elif sys.platform == "win32" and "cmake-options-win" in dep:
-		cmake_cmd += f" {dep['cmake-options-win']}"
+	if dep.cmake_options:
+		cmake_cmd += f" {dep.cmake_options}"
+	if sys.platform == "darwin" and dep.cmake_options_mac:
+		cmake_cmd += f" {dep.cmake_options_mac}"
+	elif sys.platform == "linux" and dep.cmake_options_lin:
+		cmake_cmd += f" {dep.cmake_options_lin}"
+	elif sys.platform == "win32" and dep.cmake_options_win:
+		cmake_cmd += f" {dep.cmake_options_win}"
 	run(cmake_cmd, options.verbose)
 
-def cmake_clean(dep, config, options:DopeOptions):
+def cmake_clean(dep:Dependency, config, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Clean")
 	run(f'cmake --build {make_dep_build_dir(dep, config, options.root)} --config {config} --target clean', options.verbose)
 
-def cmake_build(dep, config, options:DopeOptions):
+def cmake_build(dep:Dependency, config, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Build")
 	run(f'cmake --build {make_dep_build_dir(dep, config, options.root)} --config {config}', options.verbose)
 
-def cmake_install(dep, config, options:DopeOptions):
+def cmake_install(dep:Dependency, config, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Install")
 	run(f'cmake --install {make_dep_build_dir(dep, config, options.root)} --config {config}', options.verbose)
 
-def run_cmake_for_config(dep, config, options:DopeOptions):
+def run_cmake_for_config(dep:Dependency, config, options:DopeOptions):
 	cmake_configure(dep, config, options)
 	if options.clean:
 		cmake_clean(dep, config, options)
@@ -308,11 +314,11 @@ def run_cmake_for_config(dep, config, options:DopeOptions):
 		cmake_build(dep, config, options)
 		cmake_install(dep, config, options)
 
-def run_cmake(dep, options:DopeOptions):
-	run_cmake_for_config(dep, "Debug", options)
-	run_cmake_for_config(dep, "Release", options)
+def run_cmake(dep:Dependency, options:DopeOptions):
+	for config in options.config:
+		run_cmake_for_config(dep, config, options)
 
-def run_script(dep, options:DopeOptions):
+def run_script(dep:Dependency, options:DopeOptions):
 	script_path = make_dep_script_path(dep, options.assets)
 	if not os.path.exists(script_path):
 		raise FileNotFoundError(f"{script_path} not found. Did you remember to set the --assets argument?")
@@ -327,20 +333,18 @@ def run_script(dep, options:DopeOptions):
 	env["PYTHONPATH"] = str(package_root) + os.pathsep + env.get("PYTHONPATH", "")
 	run_with_env(cmd, env, options.verbose)
 
-def install_dep(dep, options:DopeOptions):
-	if "build-type" not in dep:
-		return
-	if dep["build-type"] == "cmake":
+def install_dep(dep:Dependency, options:DopeOptions):
+	if dep.build_type == "cmake":
 		run_cmake(dep, options)
-	elif dep["build-type"] == "py":
+	elif dep.build_type == "py":
 		run_script(dep, options)
 
-def have_package(dep, options:DopeOptions):
+def have_package(dep:Dependency, options:DopeOptions):
 	# NOTE: i'm aware that CMake has a --find-package option but apparently
 	# its usage is not recommended.
 	pkg_check_dir = make_pkg_check_dir(options.root)
 	os.makedirs(pkg_check_dir, exist_ok=True)
-	find_package_name = dep.get("find-package-name", dep["name"])
+	find_package_name = dep.find_package_name or dep.name
 	cmake_lists = os.path.join(pkg_check_dir, "CMakeLists.txt")
 	with open(cmake_lists, "w") as f:
 		f.write(f'cmake_minimum_required(VERSION 3.30)\n')
@@ -350,7 +354,7 @@ def have_package(dep, options:DopeOptions):
 	result = run(cmake_cmd, options.verbose, check=False)
 	return result.returncode == 0
 
-def run_dope_if_present(dep, options:DopeOptions):
+def run_dope_if_present(dep:Dependency, options:DopeOptions):
 	src_dir = make_dep_src_dir(dep, options.root)
 	assets_dir = os.path.join(src_dir, "dope")
 	if os.path.exists(os.path.join(assets_dir, DEPS_YML)):
@@ -358,38 +362,29 @@ def run_dope_if_present(dep, options:DopeOptions):
 		cmd += f' --assets "{assets_dir}"'
 		cmd += f' --root "{options.root}"'
 		cmd += f' --cmake-options "{make_global_cmake_options(options)}"'
-		cmd += f' --project-name "{dep["name"]}"'
+		cmd += f' --project-name "{dep.name}"'
 		if options.clean:
 			cmd += ' --clean'
 		if options.fresh:
 			cmd += ' --fresh'
-		if options.reinstall:
-			cmd += ' --reinstall'
-		if options.reacquire:
-			cmd += ' --reacquire'
 		if options.verbose:
 			cmd += ' --verbose'
-		if options.reacquire1:
-			for dep in options.reacquire1:
-				cmd += f' --reacquire1 {dep}'
-		if options.reinstall1:
-			for dep in options.reinstall1:
-				cmd += f' --reinstall1 {dep}'
+		for dep in options.reacquire:
+			cmd += f' --reacquire {dep}'
+		for dep in options.reinstall:
+			cmd += f' --reinstall {dep}'
 		run(cmd, verbose=True)
 
 def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
 	merged = []
-	if names:
-		merged.extend(names)
-	if reinstall:
-		merged.extend(reinstall)
-	if reacquire:
-		merged.extend(reacquire)
+	merged.extend(names)
+	merged.extend(reinstall)
+	merged.extend(reacquire)
 	merged = list(set(merged))
 	return merged
 
 def install_one_dep(name:str, deps, options:DopeOptions):
-	dep = next((d for d in deps if d["name"] == name), None)
+	dep = next((d for d in deps if d.name == name), None)
 	if not dep:
 		return
 	if not should_reinstall(dep, options) and have_package(dep, options):
@@ -445,6 +440,29 @@ def find_assets_dir(assets_arg:str):
 		return os.path.join(assets_arg, "dope")
 	raise FileNotFoundError(f"Assets directory not found in {assets_arg}")
 
+def to_dep(x:dict) -> Dependency:
+	return Dependency(
+		name=x["name"],
+		url=x["url"] if "url" in x else None,
+		git=x["git"] if "git" in x else None,
+		tag=x["tag"] if "tag" in x else None,
+		path=x["path"] if "path" in x else None,
+		build_type=x["build-type"] if "build-type" in x else "cmake",
+		cmake_options=x["cmake-options"] if "cmake-options" in x else None,
+		cmake_options_mac=x["cmake-options-mac"] if "cmake-options-mac" in x else None,
+		cmake_options_lin=x["cmake-options-lin"] if "cmake-options-lin" in x else None,
+		cmake_options_win=x["cmake-options-win"] if "cmake-options-win" in x else None,
+		md5=x["md5"] if "md5" in x else None,
+		find_package_name=x["find-package-name"] if "find-package-name" in x else None,
+		src_subdir=x["src_subdir"] if "src_subdir" in x else None,
+		add_src_files=x["add-src-files"] if "add-src-files" in x else False
+	)
+
+def to_deps(deps:list[dict]) -> list[Dependency]:
+	if deps is None:
+		return []
+	return [to_dep(dep) for dep in deps]
+
 def main():
 	colorama_init()
 	cwd        = os.getcwd()
@@ -452,17 +470,17 @@ def main():
 	assets_dir = find_assets_dir(args.assets)
 	settings   = get_settings(assets_dir)
 	deps_file  = os.path.join(assets_dir, DEPS_YML)
-	deps       = read_deps_file(deps_file)
+	deps       = to_deps(read_deps_file(deps_file))
+	names      = args.dep or []
 	dope_options = DopeOptions(
 		assets=assets_dir,
 		clean=args.clean,
 		cmake_options=args.cmake_options,
+		config=args.config or ["Debug", "Release"],
 		fresh=args.fresh,
 		project_name=args.project_name,
-		reacquire=args.reacquire,
-		reinstall=args.reinstall,
-		reacquire1=args.reacquire1,
-		reinstall1=args.reinstall1,
+		reacquire=args.reacquire or [],
+		reinstall=args.reinstall or [],
 		root=args.root,
 		settings=settings,
 		verbose=args.verbose
@@ -470,13 +488,18 @@ def main():
 	if deps is None:
 		print(f'{green(make_print_prefix(dope_options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
 		return
+	if "*" in dope_options.reacquire:
+		dope_options.reacquire = [d.name for d in deps]
+	if "*" in dope_options.reinstall:
+		dope_options.reinstall = [d.name for d in deps]
 	try:
-		if args.dep or dope_options.reacquire1 or dope_options.reinstall1:
-			names = merge_dep_lists(args.dep, dope_options.reinstall1, dope_options.reacquire1)
+		if len(names) + len(dope_options.reacquire) + len(dope_options.reinstall) > 0:
+			names = merge_dep_lists(names, dope_options.reinstall, dope_options.reacquire)
 			install_these_deps(names, deps, dope_options)
 		else:
 			install_all_deps(deps, dope_options)
 	except Exception as e:
+		print(traceback.format_exc())
 		print(f'{red(make_print_prefix(dope_options))} {red(f"Error: {e}")}')
 		sys.exit(1)
 
