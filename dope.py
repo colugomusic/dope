@@ -23,6 +23,11 @@ SETTINGS_WIN_YML = "settings-win.yml"
 SETTINGS_LIN_YML = "settings-lin.yml"
 SETTINGS_MAC_YML = "settings-mac.yml"
 
+ERR_MSG_INSTALL_SUCCEEDED_BUT_PACKAGE_NOT_FOUND = (
+	"Installation apparently succeeded but the package still cannot be found using CMake's find_package(). "
+	"This is most likely because the install rules in the dependency's CMakeLists.txt are missing or incorrect."
+)
+
 @dataclass
 class Dependency:
 	name: str
@@ -406,6 +411,8 @@ def install_one_dep(name:str, deps, options:DopeOptions):
 	get_source(dep, options)
 	run_dope_if_present(dep, options)
 	install_dep(dep, options)
+	if not have_package(dep, options):
+		print(f"{green(make_dep_print_prefix(dep, options))} {yellow(ERR_MSG_INSTALL_SUCCEEDED_BUT_PACKAGE_NOT_FOUND)}")
 
 def install_these_deps(names:list[str], deps, options:DopeOptions):
 	for name in names:
@@ -419,6 +426,8 @@ def install_all_deps(deps, options:DopeOptions):
 		get_source(dep, options)
 		run_dope_if_present(dep, options)
 		install_dep(dep, options)
+		if not have_package(dep, options):
+			print(f"{green(make_dep_print_prefix(dep, options))} {yellow(ERR_MSG_INSTALL_SUCCEEDED_BUT_PACKAGE_NOT_FOUND)}")
 
 def get_platform_settings_file_path(assets_dir):
 	match sys.platform:
