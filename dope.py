@@ -289,7 +289,7 @@ def cmake_configure(dep:Dependency, config, options:DopeOptions):
 	expected_cmake_lists = os.path.join(src_dir, "CMakeLists.txt")
 	if not os.path.exists(expected_cmake_lists):
 		if dep.url:
-			raise FileNotFoundError(f"{expected_cmake_lists} not found. You may need to provide the 'src_subdir' option for this dependency, depending on the structure of the package archive.")
+			raise FileNotFoundError(f"{expected_cmake_lists} not found. You may need to provide the 'src-subdir' option for this dependency, depending on the structure of the package archive.")
 		else:
 			raise FileNotFoundError(f"{expected_cmake_lists} not found.")
 	cmake_cmd = 'cmake'
@@ -476,7 +476,7 @@ def to_dep(x:dict) -> Dependency:
 		cmake_options_win=x["cmake-options-win"] if "cmake-options-win" in x else None,
 		md5=x["md5"] if "md5" in x else None,
 		find_package_name=x["find-package-name"] if "find-package-name" in x else None,
-		src_subdir=x["src_subdir"] if "src_subdir" in x else None,
+		src_subdir=x["src-subdir"] if "src-subdir" in x else None,
 		add_src_files=x["add-src-files"] if "add-src-files" in x else False
 	)
 
