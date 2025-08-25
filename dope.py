@@ -505,7 +505,7 @@ def settings_from_dict(settings:dict):
 def get_root_settings(options:DopeOptions):
 	settings_file = get_settings_file_path(options)
 	settings_dict = read_settings_file(settings_file) if os.path.exists(settings_file) else None
-	return settings_from_dict(settings_dict) if settings_dict else RootSettings()
+	return settings_from_dict(settings_dict) if settings_dict else RootSettings(cmake_options = [])
 
 def find_assets_dir(assets_arg:str):
 	if os.path.exists(os.path.join(assets_arg, DEPS_YML)):
