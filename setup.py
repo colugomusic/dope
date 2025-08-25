@@ -6,7 +6,6 @@ setup(
 	py_modules=["dope"],
 	install_requires=[
 		"colorama",
-		"deepmerge",
 		"GitPython",
 		"pyaml",
 		"wget",
