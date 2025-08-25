@@ -41,6 +41,7 @@ class Dependency:
 	find_package_name: str
 	src_subdir: str
 	add_src_files: bool
+	spec_src: str
 
 @dataclass
 class DopeOptions:
@@ -410,7 +411,8 @@ def find_dependency_specification_in_info_file(name:str, options:DopeOptions):
 	info_file = make_dep_info_file_path(name, options)
 	if os.path.exists(info_file):
 		info_dict = read_from_yaml(info_file)
-		deps = to_deps(read_deps_file(info_dict["spec-src"]))
+		deps_yml = info_dict["spec-src"]
+		deps = to_deps(read_deps_file(deps_yml), deps_yml)
 		return find_dependency_specification_in_deps_list(name, deps, options)
 	return None
 
@@ -431,7 +433,7 @@ def write_dependency_info(dep:Dependency, options:DopeOptions):
 	os.makedirs(make_dep_info_dir(options), exist_ok=True)
 	info_file = make_dep_info_file_path(dep.name, options)
 	dict = {}
-	dict["spec-src"] = os.path.join(options.assets, DEPS_YML)
+	dict["spec-src"] = dep.spec_src
 	write_to_yaml(dict, info_file)
 
 def remove_dep_from_lists(dep:Dependency, options:DopeOptions):
@@ -514,7 +516,7 @@ def find_assets_dir(assets_arg:str):
 		return os.path.join(assets_arg, "dope")
 	raise FileNotFoundError(f"Assets directory not found in {assets_arg}")
 
-def to_dep(x:dict) -> Dependency:
+def to_dep(x:dict, deps_yml:str) -> Dependency:
 	return Dependency(
 		name=x["name"],
 		url=x["url"] if "url" in x else None,
@@ -529,13 +531,14 @@ def to_dep(x:dict) -> Dependency:
 		md5=x["md5"] if "md5" in x else None,
 		find_package_name=x["find-package-name"] if "find-package-name" in x else None,
 		src_subdir=x["src-subdir"] if "src-subdir" in x else None,
-		add_src_files=x["add-src-files"] if "add-src-files" in x else False
+		add_src_files=x["add-src-files"] if "add-src-files" in x else False,
+		spec_src=deps_yml
 	)
 
-def to_deps(deps:list[dict]) -> list[Dependency]:
+def to_deps(deps:list[dict], deps_yml:str) -> list[Dependency]:
 	if deps is None:
 		return []
-	return [to_dep(dep) for dep in deps]
+	return [to_dep(dep, deps_yml) for dep in deps]
 
 def main():
 	colorama_init()
@@ -543,7 +546,7 @@ def main():
 	args          = parse_args(cwd)
 	assets_dir    = find_assets_dir(args.assets)
 	deps_file     = os.path.join(assets_dir, DEPS_YML)
-	deps          = to_deps(read_deps_file(deps_file))
+	deps          = to_deps(read_deps_file(deps_file), deps_file)
 	names         = args.dep or []
 	options = DopeOptions(
 		assets=assets_dir,
