@@ -129,9 +129,6 @@ def make_dep_src_add_dir(dep:Dependency, assets_dir):
 def make_pkg_check_dir(options:DopeOptions):
 	return os.path.join(options.root, "pkg-check")
 
-def make_dep_info_dir(options:DopeOptions):
-	return os.path.join(options.root, "dep-info")
-
 def run(cmd, verbose, check=True):
 	if verbose:
 		return subprocess.run(cmd, check=check, shell=True)
@@ -372,9 +369,19 @@ def have_package(dep:Dependency, options:DopeOptions):
 	result = run(cmake_cmd, options.verbose, check=False)
 	return result.returncode == 0
 
+def make_name_list_for_subdope(dep:Dependency, names:list[str]):
+	out = []
+	for name in names:
+		if is_deep_name(name):
+			if name.startswith(f'{dep.name}/'):
+				out.append(name[len(dep.name) + 1:])
+	return out
+
 def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
 	src_dir = make_dep_src_dir(dep, options.root)
 	assets_dir = os.path.join(src_dir, "dope")
+	reacquire = make_name_list_for_subdope(dep, options.reacquire)
+	reinstall = make_name_list_for_subdope(dep, options.reinstall)
 	if os.path.exists(os.path.join(assets_dir, DEPS_YML)):
 		cmd  = f'{sys.executable} {os.path.abspath(__file__)}'
 		cmd += f' --assets "{assets_dir}"'
@@ -387,9 +394,9 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 			cmd += ' --fresh'
 		if options.verbose:
 			cmd += ' --verbose'
-		for dep in options.reacquire:
+		for dep in reacquire:
 			cmd += f' --reacquire {dep}'
-		for dep in options.reinstall:
+		for dep in reinstall:
 			cmd += f' --reinstall {dep}'
 		run(cmd, verbose=True)
 
@@ -401,40 +408,12 @@ def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
 	merged = list(set(merged))
 	return merged
 
-def make_dep_info_file_path(name:str, options:DopeOptions):
-	return os.path.join(make_dep_info_dir(options), f"{name}.yml")
-
 def find_dependency_specification_in_deps_list(name:str, deps:list[Dependency], options:DopeOptions):
 	return next((d for d in deps if d.name == name), None)
-
-def find_dependency_specification_in_info_file(name:str, options:DopeOptions):
-	info_file = make_dep_info_file_path(name, options)
-	if os.path.exists(info_file):
-		info_dict = read_from_yaml(info_file)
-		deps_yml = info_dict["spec-src"]
-		deps = to_deps(read_deps_file(deps_yml), deps_yml)
-		return find_dependency_specification_in_deps_list(name, deps, options)
-	return None
-
-def find_dependency_specification(name:str, deps:list[Dependency], options:DopeOptions):
-	dep = find_dependency_specification_in_deps_list(name, deps, options)
-	if dep:
-		return dep
-	dep = find_dependency_specification_in_info_file(name, options)
-	if dep:
-		return dep
-	return None
 
 def check_if_installation_worked(dep:Dependency, options:DopeOptions):
 	if not have_package(dep, options):
 		print(f"{green(make_dep_print_prefix(dep, options))} {yellow(ERR_MSG_INSTALL_SUCCEEDED_BUT_PACKAGE_NOT_FOUND)}")
-
-def write_dependency_info(dep:Dependency, options:DopeOptions):
-	os.makedirs(make_dep_info_dir(options), exist_ok=True)
-	info_file = make_dep_info_file_path(dep.name, options)
-	dict = {}
-	dict["spec-src"] = dep.spec_src
-	write_to_yaml(dict, info_file)
 
 def remove_dep_from_lists(dep:Dependency, options:DopeOptions):
 	if dep.name in options.reacquire:
@@ -448,21 +427,42 @@ def should_reacquire(dep:Dependency, options:DopeOptions):
 def should_reinstall(dep:Dependency, options:DopeOptions):
 	return "*" in options.reinstall or dep.name in options.reinstall or should_reacquire(dep, options)
 
+def a_sub_dependency_needs_to_reacquire_or_reinstall(dep:Dependency, options:DopeOptions):
+	for name in options.reacquire:
+		if is_deep_name(name):
+			if name.startswith(f'{dep.name}/'):
+				return True
+	for name in options.reinstall:
+		if is_deep_name(name):
+			if name.startswith(f'{dep.name}/'):
+				return True
+	return False
+
 def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
 	reacquire = should_reacquire(dep, options)
 	reinstall = should_reinstall(dep, options)
-	if not reinstall and have_package(dep, options):
+	this_dep_needs_reinstall = reinstall or not have_package(dep, options)
+	a_sub_dep_needs_to_process = a_sub_dependency_needs_to_reacquire_or_reinstall(dep, options)
+	if not this_dep_needs_reinstall and not a_sub_dep_needs_to_process:
 		print(f"{green(make_dep_print_prefix(dep, options))} already installed")
 		return
 	remove_dep_from_lists(dep, options)
-	get_source(dep, options, reacquire)
-	run_dope_if_present(dep, options, root_settings)
-	install_dep(dep, options, root_settings)
-	write_dependency_info(dep, options)
-	check_if_installation_worked(dep, options)
+	if this_dep_needs_reinstall:
+		get_source(dep, options, reacquire)
+	if this_dep_needs_reinstall or a_sub_dep_needs_to_process:
+		run_dope_if_present(dep, options, root_settings)
+	if this_dep_needs_reinstall:
+		install_dep(dep, options, root_settings)
+		check_if_installation_worked(dep, options)
+
+def is_deep_name(name:str):
+	return name.count("/") > 0
 
 def find_and_install_one_dep(name:str, deps:list[Dependency], options:DopeOptions, root_settings:RootSettings):
-	dep = find_dependency_specification(name, deps, options)
+	if is_deep_name(name):
+		# skip as it will be processed when the parent is processed
+		return
+	dep = find_dependency_specification_in_deps_list(name, deps, options)
 	if not dep:
 		raise ValueError(f"Dependency {name} not found")
 	install_one_dep(dep, options, root_settings)
@@ -540,6 +540,14 @@ def to_deps(deps:list[dict], deps_yml:str) -> list[Dependency]:
 		return []
 	return [to_dep(dep, deps_yml) for dep in deps]
 
+def add_parents(names:list[str]):
+	parents = set()
+	for name in names:
+		if is_deep_name(name):
+			parents.add(name.split("/")[0])
+	names.extend(parents)
+	return names
+
 def main():
 	colorama_init()
 	cwd           = os.getcwd()
@@ -571,6 +579,7 @@ def main():
 	try:
 		if len(names) + len(options.reacquire) + len(options.reinstall) > 0:
 			names = merge_dep_lists(names, options.reinstall, options.reacquire)
+			names = add_parents(names)
 			find_and_install_these_deps(names, deps, options, root_settings)
 		else:
 			install_all_deps(deps, options, root_settings)
