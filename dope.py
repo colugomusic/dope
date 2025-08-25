@@ -1,7 +1,6 @@
 from colorama import Fore, Style
 from colorama import init as colorama_init
 from dataclasses import dataclass
-from deepmerge import always_merger
 from git import Repo
 from pathlib import Path
 from urllib.parse import urlparse
