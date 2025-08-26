@@ -27,20 +27,20 @@ ERR_MSG_INSTALL_SUCCEEDED_BUT_PACKAGE_NOT_FOUND = (
 @dataclass
 class Dependency:
 	name: str
-	url: str
-	git: str
-	tag: str
-	path: str
-	build_type: str
-	cmake_options: str
-	cmake_options_mac: str
-	cmake_options_lin: str
-	cmake_options_win: str
-	md5: str
-	find_package_name: str
-	src_subdir: str
-	add_src_files: bool
-	spec_src: str
+	url: str = None
+	git: str = None
+	tag: str = None
+	path: str = None
+	build_type: str = None
+	cmake_options: str = None
+	cmake_options_mac: str = None
+	cmake_options_lin: str = None
+	cmake_options_win: str = None
+	md5: str = None
+	find_package_name: str = None
+	src_subdir: str = None
+	add_src_files: bool = False
+	spec_src: str = None
 
 @dataclass
 class DopeOptions:
