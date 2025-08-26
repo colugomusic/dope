@@ -46,7 +46,6 @@ class Dependency:
 class DopeOptions:
 	assets: str
 	clean: bool
-	cmake_options: str
 	config: list[str]
 	fresh: bool
 	project_name: str
@@ -163,7 +162,6 @@ def parse_args(cwd):
 	parser.add_argument('-f', '--fresh', action='store_true', help='Fresh build (clear CMake cache)')
 	parser.add_argument('--config', action='append', help='Configuration to install (default: Debug + Release)')
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
-	parser.add_argument('--cmake-options', type=str, default="", help='Additional CMake options')
 	parser.add_argument('--reacquire', action='append', help='Reacquire a specific dependency, or "*" for all')
 	parser.add_argument('--reinstall', action='append', help='Reinstall a specific dependency, or "*" for all')
 	return parser.parse_args()
@@ -270,16 +268,6 @@ def translate_special_vars(strings:list[str], options:DopeOptions):
 		s = s.replace("__dope_on_windows__", "ON" if sys.platform == "win32" else "OFF")
 	return strings
 
-def get_untranslated_cmake_options(options:DopeOptions, root_settings:RootSettings):
-	# CMake options passed in as a command line argument take
-	# precedence over the options in the settings file.
-	if options.cmake_options != "":
-		return options.cmake_options.split(" ")
-	return root_settings.cmake_options
-
-def make_global_cmake_options(options:DopeOptions, root_settings:RootSettings):
-	return translate_special_vars(get_untranslated_cmake_options(options, root_settings), options)
-
 def cmake_configure(dep:Dependency, config, options:DopeOptions, root_settings:RootSettings):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Configure")
 	src_dir = make_dep_src_dir(dep, options.root)
@@ -299,7 +287,7 @@ def cmake_configure(dep:Dependency, config, options:DopeOptions, root_settings:R
 	cmake_cmd.append(make_install_dir(options.root))
 	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={make_install_dir(options.root)}')
 	cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config}')
-	cmake_cmd.extend(make_global_cmake_options(options, root_settings))
+	cmake_cmd.extend(translate_special_vars(root_settings.cmake_options, options))
 	if options.fresh:
 		cmake_cmd.append('--fresh')
 	# Dependency-specific CMake options
@@ -363,11 +351,11 @@ def run_script(dep:Dependency, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} Running script {cyan(script_path)}")
 	cmd = []
 	cmd.append('python')
-	cmd.append(f'"{script_path}"')
+	cmd.append(script_path)
 	cmd.append('--root')
-	cmd.append(f'"{options.root}"')
+	cmd.append(options.root)
 	cmd.append('--assets')
-	cmd.append(f'"{options.assets}"')
+	cmd.append(options.assets)
 	if options.clean:
 		cmd.append('--clean')
 	if options.verbose:
@@ -425,8 +413,6 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 		cmd.append(assets_dir)
 		cmd.append('--root')
 		cmd.append(options.root)
-		cmd.append('--cmake-options')
-		cmd.append(make_global_cmake_options(options, root_settings))
 		cmd.append('--project-name')
 		cmd.append(dep.name)
 		if options.clean:
@@ -436,9 +422,11 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 		if options.verbose:
 			cmd.append('--verbose')
 		for dep in reacquire:
-			cmd.append(f'--reacquire {dep}')
+			cmd.append('--reacquire')
+			cmd.append(dep)
 		for dep in reinstall:
-			cmd.append(f'--reinstall {dep}')
+			cmd.append('--reinstall')
+			cmd.append(dep)
 		run(cmd, shell=False, verbose=True)
 
 def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
@@ -600,7 +588,6 @@ def main():
 	options = DopeOptions(
 		assets=assets_dir,
 		clean=args.clean,
-		cmake_options=args.cmake_options,
 		config=args.config or ["Debug", "Release"],
 		fresh=args.fresh,
 		project_name=args.project_name,
