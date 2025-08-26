@@ -128,17 +128,17 @@ def make_dep_src_add_dir(dep:Dependency, assets_dir):
 def make_pkg_check_dir(options:DopeOptions):
 	return os.path.join(options.root, "pkg-check")
 
-def run(cmd, verbose, check=True):
+def run(cmd, verbose:bool, shell:bool=True, check:bool=True):
 	if verbose:
-		return subprocess.run(cmd, check=check, shell=True)
+		return subprocess.run(cmd, check=check, shell=shell)
 	else:
-		return subprocess.run(cmd, check=check, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+		return subprocess.run(cmd, check=check, shell=shell, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-def run_with_env(cmd, env, verbose, check=True):
+def run_with_env(cmd, env, verbose, shell=True, check=True):
 	if verbose:
-		return subprocess.run(cmd, check=check, shell=True, env=env)
+		return subprocess.run(cmd, check=check, shell=shell, env=env)
 	else:
-		return subprocess.run(cmd, check=check, shell=True, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+		return subprocess.run(cmd, check=check, shell=shell, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def green(text):
 	return f"{Fore.GREEN}{text}{Style.RESET_ALL}"
@@ -262,19 +262,20 @@ def get_source(dep:Dependency, options:DopeOptions, reacquire:bool):
 	if dep.add_src_files:
 		add_src_files(dep, options)
 
-def translate_special_vars(string:str, options:DopeOptions):
-	string = string.replace("__dope_root__",       options.root)
-	string = string.replace("__dope_on_linux__",   "ON" if sys.platform == "linux" else "OFF")
-	string = string.replace("__dope_on_macos__",   "ON" if sys.platform == "darwin" else "OFF")
-	string = string.replace("__dope_on_windows__", "ON" if sys.platform == "win32" else "OFF")
-	return string
+def translate_special_vars(strings:list[str], options:DopeOptions):
+	for s in strings:
+		s = s.replace("__dope_root__",       options.root)
+		s = s.replace("__dope_on_linux__",   "ON" if sys.platform == "linux" else "OFF")
+		s = s.replace("__dope_on_macos__",   "ON" if sys.platform == "darwin" else "OFF")
+		s = s.replace("__dope_on_windows__", "ON" if sys.platform == "win32" else "OFF")
+	return strings
 
 def get_untranslated_cmake_options(options:DopeOptions, root_settings:RootSettings):
 	# CMake options passed in as a command line argument take
 	# precedence over the options in the settings file.
 	if options.cmake_options != "":
-		return options.cmake_options
-	return " ".join(root_settings.cmake_options)
+		return options.cmake_options.split(" ")
+	return root_settings.cmake_options
 
 def make_global_cmake_options(options:DopeOptions, root_settings:RootSettings):
 	return translate_special_vars(get_untranslated_cmake_options(options, root_settings), options)
@@ -288,37 +289,60 @@ def cmake_configure(dep:Dependency, config, options:DopeOptions, root_settings:R
 			raise FileNotFoundError(f"{expected_cmake_lists} not found. You may need to provide the 'src-subdir' option for this dependency, depending on the structure of the package archive.")
 		else:
 			raise FileNotFoundError(f"{expected_cmake_lists} not found.")
-	cmake_cmd = 'cmake'
-	cmake_cmd += f' -B "{make_dep_build_dir(dep, config, options.root)}"'
-	cmake_cmd += f' -S "{make_dep_src_dir(dep, options.root)}"'
-	cmake_cmd += f' --install-prefix "{make_install_dir(options.root)}"'
-	cmake_cmd += f' -DCMAKE_PREFIX_PATH="{make_install_dir(options.root)}"'
-	cmake_cmd += f' -DCMAKE_BUILD_TYPE={config}'
-	cmake_cmd += f' {make_global_cmake_options(options, root_settings)}'
+	cmake_cmd = []
+	cmake_cmd.append('cmake')
+	cmake_cmd.append('-B')
+	cmake_cmd.append(make_dep_build_dir(dep, config, options.root))
+	cmake_cmd.append('-S')
+	cmake_cmd.append(make_dep_src_dir(dep, options.root))
+	cmake_cmd.append('--install-prefix')
+	cmake_cmd.append(make_install_dir(options.root))
+	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={make_install_dir(options.root)}')
+	cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config}')
+	cmake_cmd.extend(make_global_cmake_options(options, root_settings))
 	if options.fresh:
-		cmake_cmd += ' --fresh'
+		cmake_cmd.append('--fresh')
 	# Dependency-specific CMake options
 	if dep.cmake_options:
-		cmake_cmd += f" {dep.cmake_options}"
+		cmake_cmd.append(dep.cmake_options)
 	if sys.platform == "darwin" and dep.cmake_options_mac:
-		cmake_cmd += f" {dep.cmake_options_mac}"
+		cmake_cmd.append(dep.cmake_options_mac)
 	elif sys.platform == "linux" and dep.cmake_options_lin:
-		cmake_cmd += f" {dep.cmake_options_lin}"
+		cmake_cmd.append(dep.cmake_options_lin)
 	elif sys.platform == "win32" and dep.cmake_options_win:
-		cmake_cmd += f" {dep.cmake_options_win}"
-	run(cmake_cmd, options.verbose)
+		cmake_cmd.append(dep.cmake_options_win)
+	run(cmake_cmd, shell=False, verbose=options.verbose)
 
 def cmake_clean(dep:Dependency, config, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Clean")
-	run(f'cmake --build {make_dep_build_dir(dep, config, options.root)} --config {config} --target clean', options.verbose)
+	cmake_cmd = []
+	cmake_cmd.append('cmake')
+	cmake_cmd.append('--build')
+	cmake_cmd.append(make_dep_build_dir(dep, config, options.root))
+	cmake_cmd.append('--config')
+	cmake_cmd.append(config)
+	cmake_cmd.append('--target clean')
+	run(cmake_cmd, shell=False, verbose=options.verbose)
 
 def cmake_build(dep:Dependency, config, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Build")
-	run(f'cmake --build {make_dep_build_dir(dep, config, options.root)} --config {config}', options.verbose)
+	cmake_cmd = []
+	cmake_cmd.append('cmake')
+	cmake_cmd.append('--build')
+	cmake_cmd.append(make_dep_build_dir(dep, config, options.root))
+	cmake_cmd.append('--config')
+	cmake_cmd.append(config)
+	run(cmake_cmd, shell=False, verbose=options.verbose)
 
 def cmake_install(dep:Dependency, config, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Install")
-	run(f'cmake --install {make_dep_build_dir(dep, config, options.root)} --config {config}', options.verbose)
+	cmake_cmd = []
+	cmake_cmd.append('cmake')
+	cmake_cmd.append('--install')
+	cmake_cmd.append(make_dep_build_dir(dep, config, options.root))
+	cmake_cmd.append('--config')
+	cmake_cmd.append(config)
+	run(cmake_cmd, shell=False, verbose=options.verbose)
 
 def run_cmake_for_config(dep:Dependency, config, options:DopeOptions, root_settings:RootSettings):
 	cmake_configure(dep, config, options, root_settings)
@@ -337,15 +361,21 @@ def run_script(dep:Dependency, options:DopeOptions):
 	if not os.path.exists(script_path):
 		raise FileNotFoundError(f"{script_path} not found. Did you remember to set the --assets argument?")
 	print(f"{green(make_dep_print_prefix(dep, options))} Running script {cyan(script_path)}")
-	cmd = f'python {script_path} --root "{options.root}" --assets "{options.assets}"'
+	cmd = []
+	cmd.append('python')
+	cmd.append(f'"{script_path}"')
+	cmd.append('--root')
+	cmd.append(f'"{options.root}"')
+	cmd.append('--assets')
+	cmd.append(f'"{options.assets}"')
 	if options.clean:
-		cmd += ' --clean'
+		cmd.append('--clean')
 	if options.verbose:
-		cmd += ' --verbose'
+		cmd.append('--verbose')
 	env = os.environ.copy()
 	package_root = Path(__file__).resolve().parent
 	env["PYTHONPATH"] = str(package_root) + os.pathsep + env.get("PYTHONPATH", "")
-	run_with_env(cmd, env, options.verbose)
+	run_with_env(cmd, env, shell=False, verbose=options.verbose)
 
 def install_dep(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
 	if dep.build_type == "cmake":
@@ -364,8 +394,14 @@ def have_package(dep:Dependency, options:DopeOptions):
 		f.write(f'cmake_minimum_required(VERSION 3.30)\n')
 		f.write(f'project(dope-package-find-test CXX)\n')
 		f.write(f'find_package({find_package_name} REQUIRED CONFIG)\n')
-	cmake_cmd = f'cmake -B "{pkg_check_dir}" -S "{pkg_check_dir}" -DCMAKE_PREFIX_PATH="{make_install_dir(options.root)}"'
-	result = run(cmake_cmd, options.verbose, check=False)
+	cmake_cmd = []
+	cmake_cmd.append('cmake')
+	cmake_cmd.append('-B')
+	cmake_cmd.append(pkg_check_dir)
+	cmake_cmd.append('-S')
+	cmake_cmd.append(pkg_check_dir)
+	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={make_install_dir(options.root)}')
+	result = run(cmake_cmd, shell=False, verbose=options.verbose, check=False)
 	return result.returncode == 0
 
 def make_name_list_for_subdope(dep:Dependency, names:list[str]):
@@ -382,22 +418,28 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 	reacquire = make_name_list_for_subdope(dep, options.reacquire)
 	reinstall = make_name_list_for_subdope(dep, options.reinstall)
 	if os.path.exists(os.path.join(assets_dir, DEPS_YML)):
-		cmd  = f'{sys.executable} {os.path.abspath(__file__)}'
-		cmd += f' --assets "{assets_dir}"'
-		cmd += f' --root "{options.root}"'
-		cmd += f' --cmake-options "{make_global_cmake_options(options, root_settings)}"'
-		cmd += f' --project-name "{dep.name}"'
+		cmd = []
+		cmd.append(sys.executable)
+		cmd.append(os.path.abspath(__file__))
+		cmd.append('--assets')
+		cmd.append(assets_dir)
+		cmd.append('--root')
+		cmd.append(options.root)
+		cmd.append('--cmake-options')
+		cmd.append(make_global_cmake_options(options, root_settings))
+		cmd.append('--project-name')
+		cmd.append(dep.name)
 		if options.clean:
-			cmd += ' --clean'
+			cmd.append('--clean')
 		if options.fresh:
-			cmd += ' --fresh'
+			cmd.append('--fresh')
 		if options.verbose:
-			cmd += ' --verbose'
+			cmd.append('--verbose')
 		for dep in reacquire:
-			cmd += f' --reacquire {dep}'
+			cmd.append(f'--reacquire {dep}')
 		for dep in reinstall:
-			cmd += f' --reinstall {dep}'
-		run(cmd, verbose=True)
+			cmd.append(f'--reinstall {dep}')
+		run(cmd, shell=False, verbose=True)
 
 def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
 	merged = []
