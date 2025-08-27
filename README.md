@@ -103,6 +103,7 @@ This is a stripped down example from my own project which shows some various way
 
 - name:                madronalib
   git:                 https://github.com/madronalabs/madronalib.git
+  tag:                 6896aca
   add-src-files:       true
 
 - name:                Immer
