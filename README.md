@@ -17,7 +17,7 @@ This is a C++ dependency installer.
 
 ## Installation
 ```
-pip install path/to/dope/
+pip install path/to/this/repository/
 ```
 
 ## Usage
