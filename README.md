@@ -8,7 +8,7 @@ This is a C++ dependency installer.
 - Dependencies are built locally at least once. Binaries can then be re-used.
 - Dope will call itself recursively when processing dependencies which also use dope for their sub-dependencies.
 - Dependencies can be downloaded from package archives, or cloned using git, or copied from some other local path on your computer.
-- There is no centralized package repository or community of package maintainers. This is not a package manager.
+- There is no centralized package repository or community of package maintainers. There are no "recipes". There are no packages. This is not a package manager.
 - You have to use your brain to manually resolve version conflicts. We assume that if something during the build tries to use a version of a dependency which is not the one installed, then it will tell you about it.
 - There is no additional meta-data stored about the state of your dependencies such as which ones are installed and which ones aren't.
 - Dependencies are considered to be "installed" if `find_package(dependency_name REQUIRED CONFIG)` succeeds.
