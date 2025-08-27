@@ -184,8 +184,8 @@ Go to the root of your project and run
 `dope -r /path/to/your/dope/root`
 
 If you want to run the command from somewhere else then you can explictly specify the project path with either of:
-`dope -r /path/to/your/dope/root -a /path/to/project/root`
-`dope -r /path/to/your/dope/root -a /path/to/project/root/dope`
+- `dope -r /path/to/your/dope/root -a /path/to/project/root`
+- `dope -r /path/to/your/dope/root -a /path/to/project/root/dope`
 
 ### Arguments
 
