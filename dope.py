@@ -238,12 +238,21 @@ def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 	url = dep.git
 	clone_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
 	if os.path.exists(clone_dir) and reacquire:
-		shutil.rmtree(clone_dir, onerror=handle_remove_readonly)
+		if os.path.exists(os.path.join(clone_dir, ".git")):
+			print(f'{green(make_dep_print_prefix(dep, options))} Pulling latest changes from {cyan(url)}')
+			repo = Repo(clone_dir)
+			repo.remotes.origin.pull()
+			repo.git.reset(hard=True)
+			repo.git.submodule('update', '--init', '--recursive')
+			return
+		else:
+			shutil.rmtree(clone_dir, onerror=handle_remove_readonly)
 	if not os.path.exists(clone_dir):
 		print(f"{green(make_dep_print_prefix(dep, options))} Cloning from {cyan(url)}")
 		repo = Repo.clone_from(url, clone_dir)
 		if dep.tag:
 			repo.git.checkout(dep.tag)
+			repo.git.submodule('update', '--init', '--recursive')
 	else:
 		print(f"{green(make_dep_print_prefix(dep, options))} Skipping clone from {cyan(url)} because it already exists in {cyan(clone_dir)}")
 
