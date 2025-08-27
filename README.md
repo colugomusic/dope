@@ -196,10 +196,10 @@ If you want to run the command from somewhere else then you can explictly specif
 
 ## Arguments
 
-### -r/--root
+### -r/--root (path)
 Path to your root folder.
 
-### -a/--assets
+### -a/--assets (path)
 Path to the "assets folder" which contains your `deps.yml`. If not specified, defaults to `(current working directory)/dope`
 
 ### --verbose
@@ -214,11 +214,11 @@ Forwards `--fresh` to CMake dependencies.
 ### --config
 Can be given multiple times to specify configs to install. Defaults to `--config Debug --config Release`
 
-### -1/--dep
+### -1/--dep (name)
 Can be given multiple times to build and install specific dependencies.
 
-### --reacquire
-Can be given multiple times to reacquire dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
+### --reacquire (name)
+Can be given multiple times to reacquire specific dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
 
 `--reacquire *` will reacquire all dependencies.
 
@@ -226,8 +226,8 @@ Can be given multiple times to reacquire dependencies (zip files will be redownl
 
 For `remote-path` dependencies, equivalent to `--reinstall`
 
-### --reinstall
-Can be given multiple times to reinstall dependencies. This basically skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
+### --reinstall (name)
+Can be given multiple times to reinstall specific dependencies. This basically skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
 
 `--reinstall *` will reinstall all dependencies.
 
