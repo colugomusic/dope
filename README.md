@@ -218,4 +218,4 @@ Therefore `--reacquire bar` or `--reinstall bar` will not work.
 
 However, you can refer to this dependency with the syntax `--reacquire foo/bar` or `--reinstall foo/bar`.
 
-Alternatively you can just process foo's sub-dependencies directly with `dope -z /path/to/your/dope/root -a /path/to/foo --reinstall bar`
+Alternatively you can process foo's sub-dependencies directly with `dope -z /path/to/your/dope/root -a /path/to/foo --reinstall bar`
