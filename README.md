@@ -193,7 +193,7 @@ If you want to run the command from somewhere else then you can explictly specif
 Basically prints everything that is happening. You will want this if a dependency installation is failing for some reason.
 
 #### --clean
-Passes "--target clean" to CMake dependencies, and "--clean" to non-CMake dependencies. Skips the install step.
+Passes `--target clean` to CMake dependencies, and `--clean` to non-CMake dependencies. Skips the install step.
 
 #### --fresh
 Forwards `--fresh` to CMake dependencies.
