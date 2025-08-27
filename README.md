@@ -8,7 +8,7 @@ This is a C++ dependency installer.
 - Dependencies are built locally at least once. Binaries can then be re-used.
 - Dope will call itself recursively when processing dependencies which also use dope for their sub-dependencies.
 - Dependencies can be downloaded from package archives, or cloned using git, or copied from some other local path on your computer.
-- There is no centralized package repository or community of package maintainers. This is not a package manager.
+- There is no centralized package repository or community of package maintainers. There are no "recipes". There are no packages. This is not a package manager.
 - You have to use your brain to manually resolve version conflicts. We assume that if something during the build tries to use a version of a dependency which is not the one installed, then it will tell you about it.
 - There is no additional meta-data stored about the state of your dependencies such as which ones are installed and which ones aren't.
 - Dependencies are considered to be "installed" if `find_package(dependency_name REQUIRED CONFIG)` succeeds.
@@ -17,7 +17,7 @@ This is a C++ dependency installer.
 
 ## Installation
 ```
-pip install path/to/dope/
+pip install path/to/this/repository/
 ```
 
 ## Usage
@@ -62,6 +62,10 @@ macos:
     - -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
 ```
 
+Everything in the settings file is optional but if you are building for both Debug and Release then you very likely want to remember `CMAKE_DEBUG_POSTFIX`.
+
+The platform-specific sections are named `linux`, `macos`, and `windows`.
+
 In the root of your project, create the file `dope/deps.yml`:
 
 ```
@@ -70,7 +74,7 @@ In the root of your project, create the file `dope/deps.yml`:
  ┃ ┗ 📜deps.yml
 ```
 
-### Example 📜deps.yml
+## Example 📜deps.yml
 
 This is a stripped down example from my own project which shows some various ways of specifying dependencies:
 
@@ -130,28 +134,43 @@ This is a stripped down example from my own project which shows some various way
 
 Options `url`, `git`, `path` and `remote-path` are mutually exclusive.
 
-#### name
-You can give dependencies any name you want.
+### name
+You can give dependencies any name you want, but this is also the name that will be passed to `find_package()` to check if the installation was successful, unless `find-package-name` is also specified. Note that `find_package()` is case-sensitive.
 
-#### url
+### url
 Source will be downloaded from the internet and extracted into `root/src/(dependency name)`. It's assumed that the downloaded file is an archive.
 
-#### git
+### git
 Source will be cloned from the remote git repository.
 
-#### path
+### path
 Source will be copied from the specified location on your computer, `root/src/(dependency name)`
 
-#### remote-path
-Like `path`, but the source location is simply referenced instead of being copied into `root/src/(dependency name)`. The `--reacquire` option has no effect for `remote-path` dependencies.
+### remote-path
+Like `path`, but the source location is simply referenced instead of being copied into `root/src/(dependency name)`.
 
-#### tag
+### tag
 Only used with `git` to specify a tag.
 
-#### build-type
+### build-type
 Possible values are "cmake" or "py". If not specified this defaults to "cmake".
 
-##### Installing dependencies using a custom script
+### add-src-files
+If specified, the contents of `(project root)/dope/(dependency name)/src` will be copied into the dependency's source directory before building it. You can use this to overwrite a broken or problematic `CMakeLists.txt` with your own, for example.
+
+### md5
+If specified, will be checked against the md5 hash of the package downloaded from the url specified with `url`
+
+### find-package-name
+If the name that should be passed to `find_package()` differs from the dependency name then you can specify it here. Note that `find_package()` is case-sensitive.
+
+### src-subdir
+Most packages you get from github or similar repositories will extract to a single subfolder named something like "(name)-(version)". If the archive contains multiple subfolders or a subfolder which isn't named in a predictable way then you can manually specify which folder, relative to the root of the extracted archive, contains the source code. (The Boost example here isn't actually necessary)
+
+### cmake-options
+CMake options which will be used when building the dependency, in addition to the options specified in `root/settings.yml`. You can specify platform-specific options with `cmake-options-lin`, `cmake-options-mac` and `cmake-options-win`.
+
+## Installing dependencies using a custom script
 If `build-type` is "py" then dope will look for a python script at `(project root)/dope/(dependency name)/install.py`. This script can do whatever you want to install the dependency. The script is working successfully if by the end of it, `find_package(dependency_name REQUIRED CONFIG)` succeeds.
 
 The script should accept these arguments which will be forwarded from the top-level dope invocation (arguments are documented below)
@@ -164,58 +183,51 @@ parser.add_argument("--verbose", action="store_true")
 args = parser.parse_args()
 ```
 
-#### add-src-files
-If specified, the contents of `(project root)/dope/(dependency name)/src` will be copied into the dependency's source directory before building it. You can use this to overwrite a broken or problematic `CMakeLists.txt` with your own, for example.
+For an example, see https://github.com/colugomusic/dope-godot-cpp (which builds the dependency using scons and then installs it using a custom CMakeLists.txt)
 
-#### md5
-If specified, will be checked against the md5 hash of the package downloaded from the url specified with `url`
-
-#### find-package-name
-If the name that should be passed to `find_package()` differs from the dependency name then you can specify it here.
-
-#### src-subdir
-Most packages you get from github or similar repositories will extract to a single subfolder named something like "(name)-(version)". If the archive contains multiple subfolders or a subfolder which isn't named in a predictable way then you can manually specify which folder, relative to the root of the extracted archive, contains the source code. (The Boost example here isn't actually necessary)
-
-#### cmake-options
-CMake options which will be used when building the dependency, in addition to the options specified in `root/settings.yml`. You can specify platform-specific options with `cmake-options-lin`, `cmake-options-mac` and `cmake-options-win`.
-
-### How to run it
+## How to run it
 Go to the root of your project and run
 `dope -r /path/to/your/dope/root`
 
 If you want to run the command from somewhere else then you can explictly specify the project path with either of:
-`dope -r /path/to/your/dope/root -a /path/to/project/root`
-`dope -r /path/to/your/dope/root -a /path/to/project/root/dope`
+- `dope -r /path/to/your/dope/root -a /path/to/project/root`
+- `dope -r /path/to/your/dope/root -a /path/to/project/root/dope`
 
-### Arguments
+## Arguments
 
-#### --verbose
+### -r/--root
+Path to your root folder.
+
+### -a/--assets
+Path to the "assets folder" which contains your `deps.yml`. If not specified, defaults to `(current working directory)/dope`
+
+### --verbose
 Basically prints everything that is happening. You will want this if a dependency installation is failing for some reason.
 
-#### --clean
+### --clean
 Passes `--target clean` to CMake dependencies, and `--clean` to non-CMake dependencies. Skips the install step.
 
-#### --fresh
+### --fresh
 Forwards `--fresh` to CMake dependencies.
 
-#### --config
-Can be specified multiple times to specify configs to install. Defaults to `--config Debug --config Release`
+### --config
+Can be given multiple times to specify configs to install. Defaults to `--config Debug --config Release`
 
-#### --reacquire
-Can be specified multiple times to reacquire dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
+### --reacquire
+Can be given multiple times to reacquire dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
 
 `--reacquire` implies also `--reinstall`.
 
 For `remote-path` dependencies, equivalent to `--reinstall`
 
-#### --reinstall
-Can be specified multiple times to reinstall dependencies. This basically skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
+### --reinstall
+Can be given multiple times to reinstall dependencies. This basically skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
 
-### Referring to sub-dependencies
+## Referring to sub-dependencies
 Dope is only immediately aware of the dependencies specified in the `deps.yml` that it is currently processing. So if a dependency `foo` is also using dope, and specifies a sub-dependency `bar` then dope will not be aware of that until it gets around to processing `foo`.
 
 Therefore `--reacquire bar` or `--reinstall bar` will not work.
 
 However, you can refer to this dependency with the syntax `--reacquire foo/bar` or `--reinstall foo/bar`.
 
-Alternatively you can just process foo's sub-dependencies directly with `dope -z /path/to/your/dope/root -a /path/to/foo --reinstall bar`
+Alternatively you can process foo's sub-dependencies directly with `dope -z /path/to/your/dope/root -a /path/to/foo --reinstall bar`
