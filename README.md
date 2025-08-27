@@ -215,7 +215,7 @@ Forwards `--fresh` to CMake dependencies.
 Can be given multiple times to specify configs to install. Defaults to `--config Debug --config Release`
 
 ### -1/--dep (name)
-Can be given multiple times to build and install specific dependencies.
+Can be given multiple times to install specific dependencies.
 
 ### --reacquire (name)
 Can be given multiple times to reacquire specific dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
