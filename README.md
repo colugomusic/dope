@@ -211,17 +211,17 @@ Passes `--target clean` to CMake dependencies, and `--clean` to non-CMake depend
 Forwards `--fresh` to CMake dependencies.
 
 ### --config
-Can be specified multiple times to specify configs to install. Defaults to `--config Debug --config Release`
+Can be given multiple times to specify configs to install. Defaults to `--config Debug --config Release`
 
 ### --reacquire
-Can be specified multiple times to reacquire dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
+Can be given multiple times to reacquire dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
 
 `--reacquire` implies also `--reinstall`.
 
 For `remote-path` dependencies, equivalent to `--reinstall`
 
 ### --reinstall
-Can be specified multiple times to reinstall dependencies. This basically skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
+Can be given multiple times to reinstall dependencies. This basically skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
 
 ## Referring to sub-dependencies
 Dope is only immediately aware of the dependencies specified in the `deps.yml` that it is currently processing. So if a dependency `foo` is also using dope, and specifies a sub-dependency `bar` then dope will not be aware of that until it gets around to processing `foo`.
