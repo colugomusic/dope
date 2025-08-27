@@ -15,6 +15,11 @@ This is a C++ dependency installer.
 - `find_package(dependency_name REQUIRED CONFIG)` is checked automatically, once before processing a dependency, to skip it if it's already installed, and once again after installing the dependency, to check if it installed successfully.
 - Only Windows, macOS and Linux are considered.
 
+## Installation
+```
+pip install path/to/dope/
+```
+
 ## Usage
 
 Dope requires a "root". This is a folder on your computer which will have the following structure.
