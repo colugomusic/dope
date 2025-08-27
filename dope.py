@@ -98,25 +98,36 @@ def get_filename_without_extension_from_url(url:str):
 	filename = path.split("/")[-1]
 	return filename.rpartition(".")[0]
 
+def has_only_one_subdir(dir:str):
+	return len(os.listdir(dir)) == 1
+
 def get_subdirs_to_try(dep:Dependency, unpack_dir:str):
-	version                    = get_version_from_url(dep.url)
-	filename_without_extension = get_filename_without_extension_from_url(dep.url)
 	subdirs = []
-	if version:
-		subdirs.append(os.path.join(unpack_dir, dep.name + "-" + version))
-	if filename_without_extension:
-		subdirs.append(os.path.join(unpack_dir, dep.name + "-" + filename_without_extension))
+	subdirs.append(unpack_dir)
+	if has_only_one_subdir(unpack_dir):
+		subdirs.append(os.path.join(unpack_dir, os.listdir(unpack_dir)[0]))
+	else:
+		version                    = get_version_from_url(dep.url)
+		filename_without_extension = get_filename_without_extension_from_url(dep.url)
+		if version:
+			subdirs.append(os.path.join(unpack_dir, dep.name + "-" + version))
+		if filename_without_extension:
+			subdirs.append(os.path.join(unpack_dir, dep.name + "-" + filename_without_extension))
 	return subdirs
 
-def make_dep_src_dir(dep:Dependency, root):
+def make_dep_src_dir(dep:Dependency, root:str, cmake:bool):
 	unpack_dir = make_dep_src_unpack_dir(dep, root)
 	if dep.url:
 		if dep.src_subdir:
 			return os.path.join(unpack_dir, dep.src_subdir)
 		subdirs = get_subdirs_to_try(dep, unpack_dir)
 		for subdir in subdirs:
-			if os.path.exists(subdir):
-				return subdir
+			if cmake:
+				if os.path.exists(os.path.join(subdir, "CMakeLists.txt")):
+					return subdir
+			else:
+				if os.path.exists(subdir):
+					return subdir
 	return unpack_dir
 
 def make_dep_script_path(dep:Dependency, assets_dir):
@@ -222,7 +233,7 @@ def download_source_from_url(dep, options:DopeOptions, reacquire:bool):
 
 def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 	url = dep.git
-	clone_dir = make_dep_src_dir(dep, options.root)
+	clone_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
 	if os.path.exists(clone_dir) and reacquire:
 		shutil.rmtree(clone_dir, onerror=handle_remove_readonly)
 	if not os.path.exists(clone_dir):
@@ -234,7 +245,7 @@ def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 		print(f"{green(make_dep_print_prefix(dep, options))} Skipping clone from {cyan(url)} because it already exists in {cyan(clone_dir)}")
 
 def copy_source_from_path(dep:Dependency, options:DopeOptions, reacquire:bool):
-	copy_dir = make_dep_src_dir(dep, options.root)
+	copy_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
 	if os.path.exists(copy_dir) and reacquire:
 		shutil.rmtree(copy_dir, onerror=handle_remove_readonly)
 	if not os.path.exists(copy_dir):
@@ -245,7 +256,7 @@ def copy_source_from_path(dep:Dependency, options:DopeOptions, reacquire:bool):
 
 def add_src_files(dep:Dependency, options:DopeOptions):
 	src_add_dir = make_dep_src_add_dir(dep, options.assets)
-	src_dst_dir = make_dep_src_dir(dep, options.root)
+	src_dst_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
 	for file in os.listdir(src_add_dir):
 		dst_file = os.path.join(src_dst_dir, file)
 		print(f"{green(make_dep_print_prefix(dep, options))} Adding {cyan(dst_file)}")
@@ -296,7 +307,7 @@ def is_multi_config(dep:Dependency, config:str, options:DopeOptions):
 	return False
 
 def cmake_configure(dep:Dependency, build_dir:str, config:Optional[str], options:DopeOptions, root_settings:RootSettings):
-	src_dir = make_dep_src_dir(dep, options.root)
+	src_dir = make_dep_src_dir(dep, options.root, True)
 	expected_cmake_lists = os.path.join(src_dir, "CMakeLists.txt")
 	if not os.path.exists(expected_cmake_lists):
 		if dep.url:
@@ -308,7 +319,7 @@ def cmake_configure(dep:Dependency, build_dir:str, config:Optional[str], options
 	cmake_cmd.append('-B')
 	cmake_cmd.append(build_dir)
 	cmake_cmd.append('-S')
-	cmake_cmd.append(make_dep_src_dir(dep, options.root))
+	cmake_cmd.append(src_dir)
 	cmake_cmd.append('--install-prefix')
 	cmake_cmd.append(make_install_dir(options.root))
 	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={make_install_dir(options.root)}')
@@ -446,7 +457,7 @@ def make_name_list_for_subdope(dep:Dependency, names:list[str]):
 	return out
 
 def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
-	src_dir = make_dep_src_dir(dep, options.root)
+	src_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
 	assets_dir = os.path.join(src_dir, "dope")
 	reacquire = make_name_list_for_subdope(dep, options.reacquire)
 	reinstall = make_name_list_for_subdope(dep, options.reinstall)
