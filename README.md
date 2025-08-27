@@ -195,6 +195,12 @@ If you want to run the command from somewhere else then you can explictly specif
 
 ## Arguments
 
+### -r/--root
+Path to your root folder.
+
+### -a/--assets
+Path to the "assets folder" which contains your `deps.yml`. If not specified, defaults to `(current working directory)/dope`
+
 ### --verbose
 Basically prints everything that is happening. You will want this if a dependency installation is failing for some reason.
 
