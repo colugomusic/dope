@@ -143,7 +143,7 @@ Source will be cloned from the remote git repository.
 Source will be copied from the specified location on your computer, `root/src/(dependency name)`
 
 #### remote-path
-Like `path`, but the source location is simply referenced instead of being copied into `root/src/(dependency name)`. The `--reacquire` option has no effect for `remote-path` dependencies.
+Like `path`, but the source location is simply referenced instead of being copied into `root/src/(dependency name)`.
 
 #### tag
 Only used with `git` to specify a tag.
