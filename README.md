@@ -202,7 +202,11 @@ Forwards `--fresh` to CMake dependencies.
 Can be specified multiple times to specify configs to install. Defaults to `--config Debug --config Release`
 
 #### --reacquire
-Can be specified multiple times to reacquire dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.) Has no effect for `remote-path` dependencies.
+Can be specified multiple times to reacquire dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
+
+`--reacquire` implies also `--reinstall`.
+
+For `remote-path` dependencies, equivalent to `--reinstall`
 
 #### --reinstall
 Can be specified multiple times to reinstall dependencies. This basically skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
