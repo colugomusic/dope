@@ -183,6 +183,8 @@ parser.add_argument("--verbose", action="store_true")
 args = parser.parse_args()
 ```
 
+For an example, see https://github.com/colugomusic/dope-godot-cpp (which builds the dependency using scons and then installs it using a custom CMakeLists.txt)
+
 ## How to run it
 Go to the root of your project and run
 `dope -r /path/to/your/dope/root`
