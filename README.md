@@ -151,19 +151,6 @@ Only used with `git` to specify a tag.
 #### build-type
 Possible values are "cmake" or "py". If not specified this defaults to "cmake".
 
-##### Installing dependencies using a custom script
-If `build-type` is "py" then dope will look for a python script at `(project root)/dope/(dependency name)/install.py`. This script can do whatever you want to install the dependency. The script is working successfully if by the end of it, `find_package(dependency_name REQUIRED CONFIG)` succeeds.
-
-The script should accept these arguments which will be forwarded from the top-level dope invocation (arguments are documented below)
-```python
-parser = argparse.ArgumentParser()
-parser.add_argument("--root", type=str, required=True)
-parser.add_argument("--assets", type=str, required=True)
-parser.add_argument("--clean", action="store_true")
-parser.add_argument("--verbose", action="store_true")
-args = parser.parse_args()
-```
-
 #### add-src-files
 If specified, the contents of `(project root)/dope/(dependency name)/src` will be copied into the dependency's source directory before building it. You can use this to overwrite a broken or problematic `CMakeLists.txt` with your own, for example.
 
@@ -178,6 +165,19 @@ Most packages you get from github or similar repositories will extract to a sing
 
 #### cmake-options
 CMake options which will be used when building the dependency, in addition to the options specified in `root/settings.yml`. You can specify platform-specific options with `cmake-options-lin`, `cmake-options-mac` and `cmake-options-win`.
+
+### Installing dependencies using a custom script
+If `build-type` is "py" then dope will look for a python script at `(project root)/dope/(dependency name)/install.py`. This script can do whatever you want to install the dependency. The script is working successfully if by the end of it, `find_package(dependency_name REQUIRED CONFIG)` succeeds.
+
+The script should accept these arguments which will be forwarded from the top-level dope invocation (arguments are documented below)
+```python
+parser = argparse.ArgumentParser()
+parser.add_argument("--root", type=str, required=True)
+parser.add_argument("--assets", type=str, required=True)
+parser.add_argument("--clean", action="store_true")
+parser.add_argument("--verbose", action="store_true")
+args = parser.parse_args()
+```
 
 ### How to run it
 Go to the root of your project and run
