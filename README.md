@@ -214,8 +214,13 @@ Forwards `--fresh` to CMake dependencies.
 ### --config
 Can be given multiple times to specify configs to install. Defaults to `--config Debug --config Release`
 
+### -1/--dep
+Can be given multiple times to build and install specific dependencies.
+
 ### --reacquire
 Can be given multiple times to reacquire dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
+
+`--reacquire *` will reacquire all dependencies.
 
 `--reacquire` implies also `--reinstall`.
 
@@ -223,6 +228,8 @@ For `remote-path` dependencies, equivalent to `--reinstall`
 
 ### --reinstall
 Can be given multiple times to reinstall dependencies. This basically skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
+
+`--reinstall *` will reinstall all dependencies.
 
 ## Referring to sub-dependencies
 Dope is only immediately aware of the dependencies specified in the `deps.yml` that it is currently processing. So if a dependency `foo` is also using dope, and specifies a sub-dependency `bar` then dope will not be aware of that until it gets around to processing `foo`.
