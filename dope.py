@@ -1,3 +1,4 @@
+from typing import Optional
 from colorama import Fore, Style
 from colorama import init as colorama_init
 from dataclasses import dataclass
@@ -79,8 +80,8 @@ def make_src_dir(root):
 def make_pkg_dir(root):
 	return os.path.join(root, "pkg")
 
-def make_dep_build_dir(dep:Dependency, config, root):
-	return os.path.join(make_build_dir(config, root), dep.name)
+def make_dep_build_dir(dep:Dependency, config:Optional[str], root):
+	return os.path.join(make_build_dir(config if config else "Multi-Config", root), dep.name)
 
 def make_dep_src_unpack_dir(dep:Dependency, root):
 	return os.path.join(make_src_dir(root), dep.name)
@@ -268,8 +269,33 @@ def translate_special_vars(strings:list[str], options:DopeOptions):
 		s = s.replace("__dope_on_windows__", "ON" if sys.platform == "win32" else "OFF")
 	return strings
 
-def cmake_configure(dep:Dependency, config, options:DopeOptions, root_settings:RootSettings):
-	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Configure")
+def make_config_string(config:Optional[str]):
+	return config if config else "Multi-Config"
+
+def read_cmake_cache(dep:Dependency, config:str, options:DopeOptions):
+	build_dir = make_dep_build_dir(dep, config, options.root)
+	cmake_cache_path = os.path.join(build_dir, "CMakeCache.txt")
+	if not os.path.exists(cmake_cache_path):
+		raise FileNotFoundError(f"{cmake_cache_path} not found.")
+	with open(cmake_cache_path, "r") as f:
+		return f.read()
+
+def is_multi_config_generator(generator:str):
+	if generator == "Ninja":
+		return True
+	if generator.startswith("Visual Studio"):
+		return True
+	return False
+
+def is_multi_config(dep:Dependency, config:str, options:DopeOptions):
+	cmake_cache:str = read_cmake_cache(dep, config, options)
+	lines = cmake_cache.split("\n")
+	for line in lines:
+		if line.startswith("CMAKE_GENERATOR:INTERNAL="):
+			return is_multi_config_generator(line.split("=")[1].strip())
+	return False
+
+def cmake_configure(dep:Dependency, build_dir:str, config:Optional[str], options:DopeOptions, root_settings:RootSettings):
 	src_dir = make_dep_src_dir(dep, options.root)
 	expected_cmake_lists = os.path.join(src_dir, "CMakeLists.txt")
 	if not os.path.exists(expected_cmake_lists):
@@ -280,13 +306,14 @@ def cmake_configure(dep:Dependency, config, options:DopeOptions, root_settings:R
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('-B')
-	cmake_cmd.append(make_dep_build_dir(dep, config, options.root))
+	cmake_cmd.append(build_dir)
 	cmake_cmd.append('-S')
 	cmake_cmd.append(make_dep_src_dir(dep, options.root))
 	cmake_cmd.append('--install-prefix')
 	cmake_cmd.append(make_install_dir(options.root))
 	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={make_install_dir(options.root)}')
-	cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config}')
+	if config:
+		cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config}')
 	cmake_cmd.extend(translate_special_vars(root_settings.cmake_options, options))
 	if options.fresh:
 		cmake_cmd.append('--fresh')
@@ -301,48 +328,66 @@ def cmake_configure(dep:Dependency, config, options:DopeOptions, root_settings:R
 		cmake_cmd.append(dep.cmake_options_win)
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
-def cmake_clean(dep:Dependency, config, options:DopeOptions):
-	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Clean")
+def cmake_clean(dep:Dependency, build_dir:str, config:str, options:DopeOptions):
+	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(make_config_string(config))} Clean")
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('--build')
-	cmake_cmd.append(make_dep_build_dir(dep, config, options.root))
+	cmake_cmd.append(build_dir)
 	cmake_cmd.append('--config')
 	cmake_cmd.append(config)
 	cmake_cmd.append('--target clean')
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
-def cmake_build(dep:Dependency, config, options:DopeOptions):
-	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Build")
+def cmake_build(dep:Dependency, build_dir:str, config:str, options:DopeOptions):
+	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(make_config_string(config))} Build")
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('--build')
-	cmake_cmd.append(make_dep_build_dir(dep, config, options.root))
+	cmake_cmd.append(build_dir)
 	cmake_cmd.append('--config')
 	cmake_cmd.append(config)
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
-def cmake_install(dep:Dependency, config, options:DopeOptions):
-	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(config)} Install")
+def cmake_install(dep:Dependency, build_dir:str, config:str, options:DopeOptions):
+	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(make_config_string(config))} Install")
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('--install')
-	cmake_cmd.append(make_dep_build_dir(dep, config, options.root))
+	cmake_cmd.append(build_dir)
 	cmake_cmd.append('--config')
 	cmake_cmd.append(config)
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
-def run_cmake_for_config(dep:Dependency, config, options:DopeOptions, root_settings:RootSettings):
-	cmake_configure(dep, config, options, root_settings)
+def cmake_clean_or_build_and_install(dep:Dependency, build_dir:str, config:str, options:DopeOptions):
 	if options.clean:
-		cmake_clean(dep, config, options)
+		cmake_clean(dep, build_dir, config, options)
 	else:
-		cmake_build(dep, config, options)
-		cmake_install(dep, config, options)
+		cmake_build(dep, build_dir, config, options)
+		cmake_install(dep, build_dir, config, options)
 
 def run_cmake(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
+	did_first_configure:bool = False
+	multi_config:bool = False
+	multi_config_build_dir:str = None
 	for config in options.config:
-		run_cmake_for_config(dep, config, options, root_settings)
+		should_configure = not (multi_config and did_first_configure)
+		build_dir = make_dep_build_dir(dep, config, options.root)
+		if should_configure:
+			dep_print_prefix = make_dep_print_prefix(dep, options)
+			print(f"{green(dep_print_prefix)} Configure...", end="", flush=True)
+			cmake_configure(dep, build_dir, config, options, root_settings)
+			if not did_first_configure:
+				multi_config           = is_multi_config(dep, config, options)
+				multi_config_build_dir = build_dir
+				if multi_config:
+					print(f'\r{green(dep_print_prefix)} {cyan("Multi-Config")} Configure')
+				else:
+					print(f'\r{green(dep_print_prefix)} {cyan(config)} Configure')
+			else:
+				print(f'\r{green(dep_print_prefix)} {cyan(config)} Configure')
+		cmake_clean_or_build_and_install(dep, multi_config_build_dir if multi_config else build_dir, config, options)
+		did_first_configure = True
 
 def run_script(dep:Dependency, options:DopeOptions):
 	script_path = make_dep_script_path(dep, options.assets)
