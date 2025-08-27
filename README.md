@@ -135,7 +135,7 @@ This is a stripped down example from my own project which shows some various way
 Options `url`, `git`, `path` and `remote-path` are mutually exclusive.
 
 ### name
-You can give dependencies any name you want.
+You can give dependencies any name you want, but this is also the name that will be passed to `find_package()` to check if the installation was successful, unless `find-package-name` is also specified. Note that `find_package()` is case-sensitive.
 
 ### url
 Source will be downloaded from the internet and extracted into `root/src/(dependency name)`. It's assumed that the downloaded file is an archive.
@@ -162,7 +162,7 @@ If specified, the contents of `(project root)/dope/(dependency name)/src` will b
 If specified, will be checked against the md5 hash of the package downloaded from the url specified with `url`
 
 ### find-package-name
-If the name that should be passed to `find_package()` differs from the dependency name then you can specify it here.
+If the name that should be passed to `find_package()` differs from the dependency name then you can specify it here. Note that `find_package()` is case-sensitive.
 
 ### src-subdir
 Most packages you get from github or similar repositories will extract to a single subfolder named something like "(name)-(version)". If the archive contains multiple subfolders or a subfolder which isn't named in a predictable way then you can manually specify which folder, relative to the root of the extracted archive, contains the source code. (The Boost example here isn't actually necessary)
