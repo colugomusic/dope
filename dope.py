@@ -32,6 +32,7 @@ class Dependency:
 	git: str = None
 	tag: str = None
 	path: str = None
+	remote_path: str = None
 	build_type: str = None
 	cmake_options: str = None
 	cmake_options_mac: str = None
@@ -116,6 +117,8 @@ def get_subdirs_to_try(dep:Dependency, unpack_dir:str):
 	return subdirs
 
 def make_dep_src_dir(dep:Dependency, root:str, cmake:bool):
+	if dep.remote_path:
+		return dep.remote_path
 	unpack_dir = make_dep_src_unpack_dir(dep, root)
 	if dep.url:
 		if dep.src_subdir:
@@ -608,6 +611,7 @@ def to_dep(x:dict, deps_yml:str) -> Dependency:
 		git=x["git"] if "git" in x else None,
 		tag=x["tag"] if "tag" in x else None,
 		path=x["path"] if "path" in x else None,
+		remote_path=x["remote-path"] if "remote-path" in x else None,
 		build_type=x["build-type"] if "build-type" in x else "cmake",
 		cmake_options=x["cmake-options"] if "cmake-options" in x else None,
 		cmake_options_mac=x["cmake-options-mac"] if "cmake-options-mac" in x else None,
