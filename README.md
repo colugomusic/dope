@@ -145,7 +145,7 @@ Source will be downloaded from the internet and extracted into `root/src/(depend
 Source will be cloned from the remote git repository.
 
 ### path
-Source will be copied from the specified location on your computer, `root/src/(dependency name)`
+Source will be copied from the specified location on your computer to `root/src/(dependency name)`
 
 ### remote-path
 Like `path`, but the source location is simply referenced instead of being copied into `root/src/(dependency name)`.
