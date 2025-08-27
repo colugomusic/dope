@@ -227,7 +227,7 @@ Can be given multiple times to reacquire specific dependencies (zip files will b
 For `remote-path` dependencies, equivalent to `--reinstall`
 
 ### --reinstall (name)
-Can be given multiple times to reinstall specific dependencies. This basically skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
+Can be given multiple times to reinstall specific dependencies. This is similar to `--dep` except it skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
 
 `--reinstall *` will reinstall all dependencies.
 
