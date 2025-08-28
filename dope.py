@@ -304,7 +304,7 @@ def read_cmake_cache(dep:Dependency, config:str, options:DopeOptions):
 		return f.read()
 
 def is_multi_config_generator(generator:str):
-	if generator == "Ninja":
+	if generator == "Ninja Multi-Config":
 		return True
 	if generator.startswith("Visual Studio"):
 		return True
