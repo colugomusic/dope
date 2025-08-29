@@ -492,6 +492,9 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 			cmd.append('--fresh')
 		if options.verbose:
 			cmd.append('--verbose')
+		for config in options.config:
+			cmd.append('--config')
+			cmd.append(config)
 		for dep in reacquire:
 			cmd.append('--reacquire')
 			cmd.append(dep)
