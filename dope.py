@@ -53,6 +53,8 @@ class DopeOptions:
 	project_name: str
 	reacquire: list[str]
 	reinstall: list[str]
+	reacquire_all: bool
+	reinstall_all: bool
 	root: str
 	verbose: bool
 
@@ -474,8 +476,6 @@ def make_name_list_for_subdope(dep:Dependency, names:list[str]):
 def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
 	src_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
 	assets_dir = os.path.join(src_dir, "dope")
-	reacquire = make_name_list_for_subdope(dep, options.reacquire)
-	reinstall = make_name_list_for_subdope(dep, options.reinstall)
 	if os.path.exists(os.path.join(assets_dir, DEPS_YML)):
 		cmd = []
 		cmd.append(sys.executable)
@@ -495,12 +495,22 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 		for config in options.config:
 			cmd.append('--config')
 			cmd.append(config)
-		for dep in reacquire:
+		if options.reacquire_all:
 			cmd.append('--reacquire')
-			cmd.append(dep)
-		for dep in reinstall:
+			cmd.append('*')
+		else:
+			reacquires = make_name_list_for_subdope(dep, options.reacquire)
+			for dep in reacquires:
+				cmd.append('--reacquire')
+				cmd.append(dep)
+		if options.reinstall_all:
 			cmd.append('--reinstall')
-			cmd.append(dep)
+			cmd.append('*')
+		else:
+			reinstalls = make_name_list_for_subdope(dep, options.reinstall)
+			for dep in reinstalls:
+				cmd.append('--reinstall')
+				cmd.append(dep)
 		run(cmd, shell=False, verbose=True)
 
 def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
@@ -668,6 +678,8 @@ def main():
 		project_name=args.project_name,
 		reacquire=args.reacquire or [],
 		reinstall=args.reinstall or [],
+		reacquire_all=False,
+		reinstall_all=False,
 		root=args.root,
 		verbose=args.verbose
 	)
@@ -676,9 +688,11 @@ def main():
 		print(f'{green(make_print_prefix(options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
 		return
 	if "*" in options.reacquire:
-		options.reacquire = [d.name for d in deps]
+		options.reacquire     = [d.name for d in deps]
+		options.reacquire_all = True
 	if "*" in options.reinstall:
-		options.reinstall = [d.name for d in deps]
+		options.reinstall     = [d.name for d in deps]
+		options.reinstall_all = True
 	try:
 		if len(names) + len(options.reacquire) + len(options.reinstall) > 0:
 			names = merge_dep_lists(names, options.reinstall, options.reacquire)
