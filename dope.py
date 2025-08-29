@@ -250,7 +250,8 @@ def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 			repo = Repo(clone_dir)
 			repo.remotes.origin.pull()
 			repo.git.reset(hard=True)
-			repo.git.submodule('update', '--init', '--recursive')
+			for submodule in repo.submodules:
+				submodule.update(init=True, recursive=True)
 			return
 		else:
 			shutil.rmtree(clone_dir, onerror=handle_remove_readonly)
@@ -259,7 +260,8 @@ def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 		repo = Repo.clone_from(url, clone_dir)
 		if dep.tag:
 			repo.git.checkout(dep.tag)
-			repo.git.submodule('update', '--init', '--recursive')
+		for submodule in repo.submodules:
+			submodule.update(init=True, recursive=True)
 	else:
 		if options.verbose:
 			print(f"{green(make_dep_print_prefix(dep, options))} Skipping clone from {cyan(url)} because it already exists in {cyan(clone_dir)}")
