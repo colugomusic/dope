@@ -471,7 +471,11 @@ def have_package(dep:Dependency, options:DopeOptions):
 	result = run(cmake_cmd, shell=False, verbose=options.verbose, check=False)
 	return result.returncode == 0
 
-def make_name_list_for_subdope(dep:Dependency, names:list[str]):
+def make_name_list_for_subdope(dep:Dependency, names:list[str], all:bool):
+	if all:
+		# FIXME: this will currently re-process sub-dependencies if they
+		# are shared between the parent and the child.
+		return ["*"]
 	out = []
 	for name in names:
 		if is_deep_name(name):
@@ -501,22 +505,14 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 		for config in options.config:
 			cmd.append('--config')
 			cmd.append(config)
-		if options.reacquire_all:
+		reacquires = make_name_list_for_subdope(dep, options.reacquire, options.reacquire_all)
+		for dep in reacquires:
 			cmd.append('--reacquire')
-			cmd.append('*')
-		else:
-			reacquires = make_name_list_for_subdope(dep, options.reacquire)
-			for dep in reacquires:
-				cmd.append('--reacquire')
-				cmd.append(dep)
-		if options.reinstall_all:
+			cmd.append(dep)
+		reinstalls = make_name_list_for_subdope(dep, options.reinstall, options.reinstall_all)
+		for dep in reinstalls:
 			cmd.append('--reinstall')
-			cmd.append('*')
-		else:
-			reinstalls = make_name_list_for_subdope(dep, options.reinstall)
-			for dep in reinstalls:
-				cmd.append('--reinstall')
-				cmd.append(dep)
+			cmd.append(dep)
 		run(cmd, shell=False, verbose=True)
 
 def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
