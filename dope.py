@@ -342,13 +342,13 @@ def cmake_configure(dep:Dependency, build_dir:str, config:Optional[str], options
 		cmake_cmd.append('--fresh')
 	# Dependency-specific CMake options
 	if dep.cmake_options:
-		cmake_cmd.append(dep.cmake_options)
+		cmake_cmd.extend(dep.cmake_options.split(" "))
 	if sys.platform == "darwin" and dep.cmake_options_mac:
-		cmake_cmd.append(dep.cmake_options_mac)
+		cmake_cmd.extend(dep.cmake_options_mac.split(" "))
 	elif sys.platform == "linux" and dep.cmake_options_lin:
-		cmake_cmd.append(dep.cmake_options_lin)
+		cmake_cmd.extend(dep.cmake_options_lin.split(" "))
 	elif sys.platform == "win32" and dep.cmake_options_win:
-		cmake_cmd.append(dep.cmake_options_win)
+		cmake_cmd.extend(dep.cmake_options_win.split(" "))
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
 def cmake_clean(dep:Dependency, build_dir:str, config:str, options:DopeOptions):
