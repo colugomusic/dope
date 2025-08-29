@@ -74,8 +74,11 @@ def make_dep_print_prefix(dep:Dependency, options:DopeOptions):
 def make_build_dir(config, root):
 	return os.path.join(root, "build", config)
 
-def make_install_dir(root):
+def make_install_dir(root:str):
 	return os.path.join(root, "install")
+
+def make_nuked_dir(root:str):
+	return os.path.join(root, "install.nuked")
 
 def make_src_dir(root):
 	return os.path.join(root, "src")
@@ -177,6 +180,7 @@ def parse_args(cwd):
 	parser.add_argument('-c', '--clean', action='store_true', help='Clean instead of build/install')
 	parser.add_argument('-a', '--assets', default=default_assets_path, help='Path to assets directory')
 	parser.add_argument('-f', '--fresh', action='store_true', help='Fresh build (clear CMake cache)')
+	parser.add_argument('--nuke', action='store_true', help='Delete the install directory before doing anything else')
 	parser.add_argument('--config', action='append', help='Configuration to install (default: Debug + Release)')
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
 	parser.add_argument('--reacquire', action='append', help='Reacquire a specific dependency, or "*" for all')
@@ -683,6 +687,13 @@ def main():
 		root=args.root,
 		verbose=args.verbose
 	)
+	if args.nuke:
+		print(f'{green(make_print_prefix(options))} {yellow(f"Nuking install directory {cyan(make_install_dir(options.root))}...")}')
+		install_dir = make_install_dir(options.root)
+		nuked_dir   = make_nuked_dir(options.root)
+		if os.path.exists(nuked_dir):
+			shutil.rmtree(nuked_dir)
+		shutil.move(install_dir, nuked_dir)
 	root_settings = get_root_settings(options)
 	if deps is None:
 		print(f'{green(make_print_prefix(options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
