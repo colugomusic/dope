@@ -248,8 +248,9 @@ def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 		if os.path.exists(os.path.join(clone_dir, ".git")):
 			print(f'{green(make_dep_print_prefix(dep, options))} Pulling latest changes from {cyan(url)}')
 			repo = Repo(clone_dir)
-			repo.remotes.origin.pull()
 			repo.git.reset(hard=True)
+			repo.git.clean('-fd')
+			repo.remotes.origin.pull()
 			for submodule in repo.submodules:
 				submodule.update(init=True, recursive=True)
 			return
