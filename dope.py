@@ -232,7 +232,8 @@ def download_source_from_url(dep, options:DopeOptions, reacquire:bool):
 	if not os.path.exists(unpack_dir):
 		download_package(dep, dep.url, options)
 	else:
-		print(f"{green(make_dep_print_prefix(dep, options))} Skipping download from {cyan(dep.url)} because it already exists in {cyan(unpack_dir)}")
+		if options.verbose:
+			print(f"{green(make_dep_print_prefix(dep, options))} Skipping download from {cyan(dep.url)} because it already exists in {cyan(unpack_dir)}")
 
 def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 	url = dep.git
@@ -254,7 +255,8 @@ def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 			repo.git.checkout(dep.tag)
 			repo.git.submodule('update', '--init', '--recursive')
 	else:
-		print(f"{green(make_dep_print_prefix(dep, options))} Skipping clone from {cyan(url)} because it already exists in {cyan(clone_dir)}")
+		if options.verbose:
+			print(f"{green(make_dep_print_prefix(dep, options))} Skipping clone from {cyan(url)} because it already exists in {cyan(clone_dir)}")
 
 def copy_source_from_path(dep:Dependency, options:DopeOptions, reacquire:bool):
 	copy_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
@@ -264,7 +266,8 @@ def copy_source_from_path(dep:Dependency, options:DopeOptions, reacquire:bool):
 		print(f"{green(make_dep_print_prefix(dep, options))} Copying from {cyan(dep.path)}")
 		shutil.copytree(dep.path, copy_dir)
 	else:
-		print(f"{green(make_dep_print_prefix(dep, options))} Skipping copy from {cyan(dep.path)} because it already exists in {cyan(copy_dir)}")
+		if options.verbose:
+			print(f"{green(make_dep_print_prefix(dep, options))} Skipping copy from {cyan(dep.path)} because it already exists in {cyan(copy_dir)}")
 
 def add_src_files(dep:Dependency, options:DopeOptions):
 	src_add_dir = make_dep_src_add_dir(dep, options.assets)
