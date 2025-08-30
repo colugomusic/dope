@@ -2,7 +2,7 @@ from typing import Optional
 from colorama import Fore, Style
 from colorama import init as colorama_init
 from dataclasses import dataclass
-from git import Repo
+from git import Repo, GitCommandError
 from pathlib import Path
 from urllib.parse import urlparse
 from hashlib import md5
@@ -51,10 +51,11 @@ class DopeOptions:
 	config: list[str]
 	fresh: bool
 	project_name: str
-	reacquire: list[str]
-	reinstall: list[str]
+	reacquires: list[str]
+	reinstalls: list[str]
 	reacquire_all: bool
 	reinstall_all: bool
+	excludes: list[str]
 	root: str
 	verbose: bool
 
@@ -93,11 +94,11 @@ def make_dep_src_unpack_dir(dep:Dependency, root):
 	return os.path.join(make_src_dir(root), dep.name)
 
 def get_version_from_url(url:str):
-    path = urlparse(url).path
-    filename = path.split("/")[-1]
-    name, _, _ = filename.rpartition(".")
-    match = re.search(r'(\d+(?:\.\d+)*(?:[A-Za-z0-9\-_]*)?)$', name)
-    return match.group(1) if match else None
+	path = urlparse(url).path
+	filename = path.split("/")[-1]
+	name, _, _ = filename.rpartition(".")
+	match = re.search(r'(\d+(?:\.\d+)*(?:[A-Za-z0-9\-_]*)?)$', name)
+	return match.group(1) if match else None
 
 def get_filename_without_extension_from_url(url:str):
 	path = urlparse(url).path
@@ -183,8 +184,9 @@ def parse_args(cwd):
 	parser.add_argument('--nuke', action='store_true', help='Delete the install directory before doing anything else')
 	parser.add_argument('--config', action='append', help='Configuration to install (default: Debug + Release)')
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
-	parser.add_argument('--reacquire', action='append', help='Reacquire a specific dependency, or "*" for all')
-	parser.add_argument('--reinstall', action='append', help='Reinstall a specific dependency, or "*" for all')
+	parser.add_argument('--reacquire', action='append', default=[], help='Reacquire a specific dependency, or "*" for all')
+	parser.add_argument('--reinstall', action='append', default=[], help='Reinstall a specific dependency, or "*" for all')
+	parser.add_argument('--exclude', action='append', default=[], help='Exclude a specific dependency from being processed')
 	return parser.parse_args()
 
 def read_from_yaml(filepath:str):
@@ -241,31 +243,56 @@ def download_source_from_url(dep, options:DopeOptions, reacquire:bool):
 		if options.verbose:
 			print(f"{green(make_dep_print_prefix(dep, options))} Skipping download from {cyan(dep.url)} because it already exists in {cyan(unpack_dir)}")
 
+def reset_and_pull(dep:Dependency):
+		repo = Repo(dep.git)
+		if repo.bare:
+			raise Exception("Bare repo, cannot reset")
+		repo.git.reset("--hard")
+		repo.git.clean("-fd")
+		repo.remotes.origin.fetch()
+		if dep.tag:
+			repo.git.reset("--hard", f"origin/{dep.tag}")
+		elif repo.head.is_detached:
+			repo.git.reset("--hard", "origin/HEAD")
+		else:
+			repo.git.reset("--hard", f"origin/{repo.active_branch.name}")
+		repo.git.submodule("sync", "--recursive")
+		repo.git.submodule("update", "--init", "--recursive", "--force")
+		for submodule in repo.submodules:
+			sm_repo = submodule.module()
+			sm_repo.git.reset("--hard")
+			sm_repo.git.clean("-fd")
+			sm_repo.remotes.origin.fetch()
+			if sm_repo.head.is_detached:
+				sm_repo.git.reset("--hard", "origin/HEAD")
+			else:
+				sm_repo.git.reset("--hard", f"origin/{sm_repo.active_branch.name}")
+		return repo
+
+def nuke_and_reclone(dep:Dependency, clone_dir:str):
+	if os.path.exists(clone_dir):
+		shutil.rmtree(clone_dir)
+	repo = Repo.clone_from(dep.git, clone_dir)
+	if dep.tag:
+		repo.git.checkout(dep.tag)
+	for submodule in repo.submodules:
+		submodule.update(init=True, recursive=True)
+
 def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
-	url = dep.git
 	clone_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
 	if os.path.exists(clone_dir) and reacquire:
 		if os.path.exists(os.path.join(clone_dir, ".git")):
-			print(f'{green(make_dep_print_prefix(dep, options))} Pulling latest changes from {cyan(url)}')
-			repo = Repo(clone_dir)
-			repo.git.reset(hard=True)
-			repo.git.clean('-fd')
-			repo.remotes.origin.pull()
-			for submodule in repo.submodules:
-				submodule.update(init=True, recursive=True)
-			return
-		else:
-			shutil.rmtree(clone_dir, onerror=handle_remove_readonly)
+			print(f'{green(make_dep_print_prefix(dep, options))} Pulling latest changes from {cyan(dep.git)}')
+			try:
+				reset_and_pull(clone_dir)
+			except (GitCommandError, Exception) as e:
+				nuke_and_reclone(dep, clone_dir)
 	if not os.path.exists(clone_dir):
-		print(f"{green(make_dep_print_prefix(dep, options))} Cloning from {cyan(url)}")
-		repo = Repo.clone_from(url, clone_dir)
-		if dep.tag:
-			repo.git.checkout(dep.tag)
-		for submodule in repo.submodules:
-			submodule.update(init=True, recursive=True)
+		print(f"{green(make_dep_print_prefix(dep, options))} Cloning from {cyan(dep.git)}")
+		nuke_and_reclone(dep, clone_dir)
 	else:
 		if options.verbose:
-			print(f"{green(make_dep_print_prefix(dep, options))} Skipping clone from {cyan(url)} because it already exists in {cyan(clone_dir)}")
+			print(f"{green(make_dep_print_prefix(dep, options))} Skipping clone from {cyan(dep.git)} because it already exists in {cyan(clone_dir)}")
 
 def copy_source_from_path(dep:Dependency, options:DopeOptions, reacquire:bool):
 	copy_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
@@ -474,8 +501,6 @@ def have_package(dep:Dependency, options:DopeOptions):
 
 def make_name_list_for_subdope(dep:Dependency, names:list[str], all:bool):
 	if all:
-		# FIXME: this will currently re-process sub-dependencies if they
-		# are shared between the parent and the child.
 		return ["*"]
 	out = []
 	for name in names:
@@ -506,13 +531,16 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 		for config in options.config:
 			cmd.append('--config')
 			cmd.append(config)
-		reacquires = make_name_list_for_subdope(dep, options.reacquire, options.reacquire_all)
+		reacquires = make_name_list_for_subdope(dep, options.reacquires, options.reacquire_all)
 		for dep in reacquires:
 			cmd.append('--reacquire')
 			cmd.append(dep)
-		reinstalls = make_name_list_for_subdope(dep, options.reinstall, options.reinstall_all)
+		reinstalls = make_name_list_for_subdope(dep, options.reinstalls, options.reinstall_all)
 		for dep in reinstalls:
 			cmd.append('--reinstall')
+			cmd.append(dep)
+		for dep in options.excludes:
+			cmd.append('--exclude')
 			cmd.append(dep)
 		run(cmd, shell=False, verbose=True)
 
@@ -531,24 +559,25 @@ def check_if_installation_worked(dep:Dependency, options:DopeOptions):
 	if not have_package(dep, options):
 		print(f"{green(make_dep_print_prefix(dep, options))} {yellow(ERR_MSG_INSTALL_SUCCEEDED_BUT_PACKAGE_NOT_FOUND)}")
 
-def remove_dep_from_lists(dep:Dependency, options:DopeOptions):
-	if dep.name in options.reacquire:
-		options.reacquire.remove(dep.name)
-	if dep.name in options.reinstall:
-		options.reinstall.remove(dep.name)
+def is_dep_or_subdep(deep_name:str, name:str):
+	if deep_name == name:
+		return True
+	if deep_name.endswith(f'/{name}'):
+		return True
+	return False
 
 def should_reacquire(dep:Dependency, options:DopeOptions):
-	return "*" in options.reacquire or dep.name in options.reacquire
+	return "*" in options.reacquires or dep.name in options.reacquires
 
 def should_reinstall(dep:Dependency, options:DopeOptions):
-	return "*" in options.reinstall or dep.name in options.reinstall or should_reacquire(dep, options)
+	return "*" in options.reinstalls or dep.name in options.reinstalls or should_reacquire(dep, options)
 
 def a_sub_dependency_needs_to_reacquire_or_reinstall(dep:Dependency, options:DopeOptions):
-	for name in options.reacquire:
+	for name in options.reacquires:
 		if is_deep_name(name):
 			if name.startswith(f'{dep.name}/'):
 				return True
-	for name in options.reinstall:
+	for name in options.reinstalls:
 		if is_deep_name(name):
 			if name.startswith(f'{dep.name}/'):
 				return True
@@ -562,7 +591,7 @@ def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSetti
 	if not this_dep_needs_reinstall and not a_sub_dep_needs_to_process:
 		print(f"{green(make_dep_print_prefix(dep, options))} already installed")
 		return
-	remove_dep_from_lists(dep, options)
+	options.excludes.append(dep.name)
 	if this_dep_needs_reinstall:
 		get_source(dep, options, reacquire)
 	if this_dep_needs_reinstall or a_sub_dep_needs_to_process:
@@ -585,11 +614,13 @@ def find_and_install_one_dep(name:str, deps:list[Dependency], options:DopeOption
 
 def find_and_install_these_deps(names:list[str], deps:list[Dependency], options:DopeOptions, root_settings:RootSettings):
 	for name in names:
-		find_and_install_one_dep(name, deps, options, root_settings)
+		if not name in options.excludes:
+			find_and_install_one_dep(name, deps, options, root_settings)
 
 def install_all_deps(deps:list[Dependency], options:DopeOptions, root_settings:RootSettings):
 	for dep in deps:
-		install_one_dep(dep, options, root_settings)
+		if not dep.name in options.excludes:
+			install_one_dep(dep, options, root_settings)
 
 def get_platform_long_string():
 	match sys.platform:
@@ -679,10 +710,11 @@ def main():
 		config=args.config or ["Debug", "Release"],
 		fresh=args.fresh,
 		project_name=args.project_name,
-		reacquire=args.reacquire or [],
-		reinstall=args.reinstall or [],
+		reacquires=args.reacquire,
+		reinstalls=args.reinstall,
 		reacquire_all=False,
 		reinstall_all=False,
+		excludes=args.exclude,
 		root=args.root,
 		verbose=args.verbose
 	)
@@ -697,15 +729,15 @@ def main():
 	if deps is None:
 		print(f'{green(make_print_prefix(options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
 		return
-	if "*" in options.reacquire:
-		options.reacquire     = [d.name for d in deps]
+	if "*" in options.reacquires:
+		options.reacquires = [d.name for d in deps]
 		options.reacquire_all = True
-	if "*" in options.reinstall:
-		options.reinstall     = [d.name for d in deps]
+	if "*" in options.reinstalls:
+		options.reinstalls = [d.name for d in deps]
 		options.reinstall_all = True
 	try:
-		if len(names) + len(options.reacquire) + len(options.reinstall) > 0:
-			names = merge_dep_lists(names, options.reinstall, options.reacquire)
+		if len(names) + len(options.reacquires) + len(options.reinstalls) > 0:
+			names = merge_dep_lists(names, options.reinstalls, options.reacquires)
 			names = add_parents(names)
 			find_and_install_these_deps(names, deps, options, root_settings)
 		else:
