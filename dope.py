@@ -271,7 +271,7 @@ def reset_and_pull(dep:Dependency):
 
 def nuke_and_reclone(dep:Dependency, clone_dir:str):
 	if os.path.exists(clone_dir):
-		shutil.rmtree(clone_dir)
+		shutil.rmtree(clone_dir, onerror=handle_remove_readonly)
 	repo = Repo.clone_from(dep.git, clone_dir)
 	if dep.tag:
 		repo.git.checkout(dep.tag)
@@ -287,7 +287,8 @@ def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 				reset_and_pull(clone_dir)
 			except (GitCommandError, Exception) as e:
 				nuke_and_reclone(dep, clone_dir)
-	if not os.path.exists(clone_dir):
+			return
+	if not os.path.exists(os.path.join(clone_dir, ".git")):
 		print(f"{green(make_dep_print_prefix(dep, options))} Cloning from {cyan(dep.git)}")
 		nuke_and_reclone(dep, clone_dir)
 	else:
