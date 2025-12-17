@@ -40,6 +40,7 @@ class Dependency:
 	cmake_options_win: str = None
 	md5: str = None
 	find_package_name: str = None
+	installed_files: list[str] = None
 	src_subdir: str = None
 	add_src_files: bool = False
 	spec_src: str = None
@@ -479,7 +480,16 @@ def install_dep(dep:Dependency, options:DopeOptions, root_settings:RootSettings)
 	elif dep.build_type == "py":
 		run_script(dep, options)
 
+def all_files_exist(files: list[str], options:DopeOptions):
+	for file in files:
+		if not os.path.exists(os.path.join(make_install_dir(options.root), file)):
+			return False
+	return True
+
 def have_package(dep:Dependency, options:DopeOptions):
+	if dep.installed_files:
+		if all_files_exist(dep.installed_files, options):
+			return True
 	# NOTE: i'm aware that CMake has a --find-package option but apparently
 	# its usage is not recommended.
 	pkg_check_dir = make_pkg_check_dir(options)
@@ -679,6 +689,7 @@ def to_dep(x:dict, deps_yml:str) -> Dependency:
 		cmake_options_win=x["cmake-options-win"] if "cmake-options-win" in x else None,
 		md5=x["md5"] if "md5" in x else None,
 		find_package_name=x["find-package-name"] if "find-package-name" in x else None,
+		installed_files=x["installed-files"] if "installed-files" in x else [],
 		src_subdir=x["src-subdir"] if "src-subdir" in x else None,
 		add_src_files=x["add-src-files"] if "add-src-files" in x else False,
 		spec_src=deps_yml
