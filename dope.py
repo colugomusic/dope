@@ -56,6 +56,7 @@ class DopeOptions:
 	reinstalls: list[str]
 	reacquire_all: bool
 	reinstall_all: bool
+	reacquire_heads: bool
 	excludes: list[str]
 	root: str
 	verbose: bool
@@ -187,6 +188,7 @@ def parse_args(cwd):
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
 	parser.add_argument('--reacquire', action='append', default=[], help='Reacquire a specific dependency, or "*" for all')
 	parser.add_argument('--reinstall', action='append', default=[], help='Reinstall a specific dependency, or "*" for all')
+	parser.add_argument('--reacquire-heads', action='store_true', help='Reacquire any git dependency that has no specific tag')
 	parser.add_argument('--exclude', action='append', default=[], help='Exclude a specific dependency from being processed')
 	return parser.parse_args()
 
@@ -553,6 +555,8 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 		for dep in options.excludes:
 			cmd.append('--exclude')
 			cmd.append(dep)
+		if options.reacquire_heads:
+			cmd.append('--reacquire-heads')
 		run(cmd, shell=False, verbose=True)
 
 def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
@@ -577,8 +581,16 @@ def is_dep_or_subdep(deep_name:str, name:str):
 		return True
 	return False
 
+def is_git_head_dependency(dep:Dependency):
+	"""Returns True if this is a git dependency without a specific tag (i.e., tracking HEAD)."""
+	return dep.git is not None and dep.tag is None
+
 def should_reacquire(dep:Dependency, options:DopeOptions):
-	return "*" in options.reacquires or dep.name in options.reacquires
+	if "*" in options.reacquires or dep.name in options.reacquires:
+		return True
+	if options.reacquire_heads and is_git_head_dependency(dep):
+		return True
+	return False
 
 def should_reinstall(dep:Dependency, options:DopeOptions):
 	return "*" in options.reinstalls or dep.name in options.reinstalls or should_reacquire(dep, options)
@@ -726,6 +738,7 @@ def main():
 		reinstalls=args.reinstall,
 		reacquire_all=False,
 		reinstall_all=False,
+		reacquire_heads=args.reacquire_heads,
 		excludes=args.exclude,
 		root=args.root,
 		verbose=args.verbose
