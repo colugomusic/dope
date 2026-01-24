@@ -436,6 +436,9 @@ def run_script(dep:Dependency, options:DopeOptions):
 	cmd.append(options.assets)
 	if options.clean:
 		cmd.append('--clean')
+	for config in options.config:
+		cmd.append('--config')
+		cmd.append(config)
 	if options.verbose:
 		cmd.append('--verbose')
 	env = os.environ.copy()
