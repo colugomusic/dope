@@ -77,11 +77,10 @@ def make_dep_print_prefix(dep:Dependency, options:DopeOptions):
 def make_build_dir(config, root):
 	return os.path.join(root, "build", config)
 
-def make_install_dir(root:str):
+def make_install_dir(root:str, config:str=None):
+	if config:
+		return os.path.join(root, "install", config)
 	return os.path.join(root, "install")
-
-def make_nuked_dir(root:str):
-	return os.path.join(root, "install.nuked")
 
 def make_src_dir(root):
 	return os.path.join(root, "src")
@@ -183,7 +182,6 @@ def parse_args(cwd):
 	parser.add_argument('-c', '--clean', action='store_true', help='Clean instead of build/install')
 	parser.add_argument('-a', '--assets', default=default_assets_path, help='Path to assets directory')
 	parser.add_argument('-f', '--fresh', action='store_true', help='Fresh build (clear CMake cache)')
-	parser.add_argument('--nuke', action='store_true', help='Delete the install directory before doing anything else')
 	parser.add_argument('--config', action='append', help='Configuration to install (default: Debug + Release)')
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
 	parser.add_argument('--reacquire', action='append', default=[], help='Reacquire a specific dependency, or "*" for all')
@@ -338,30 +336,7 @@ def translate_special_vars(strings:list[str], options:DopeOptions):
 def make_config_string(config:Optional[str]):
 	return config if config else "Multi-Config"
 
-def read_cmake_cache(dep:Dependency, config:str, options:DopeOptions):
-	build_dir = make_dep_build_dir(dep, config, options.root)
-	cmake_cache_path = os.path.join(build_dir, "CMakeCache.txt")
-	if not os.path.exists(cmake_cache_path):
-		raise FileNotFoundError(f"{cmake_cache_path} not found.")
-	with open(cmake_cache_path, "r") as f:
-		return f.read()
-
-def is_multi_config_generator(generator:str):
-	if generator == "Ninja Multi-Config":
-		return True
-	if generator.startswith("Visual Studio"):
-		return True
-	return False
-
-def is_multi_config(dep:Dependency, config:str, options:DopeOptions):
-	cmake_cache:str = read_cmake_cache(dep, config, options)
-	lines = cmake_cache.split("\n")
-	for line in lines:
-		if line.startswith("CMAKE_GENERATOR:INTERNAL="):
-			return is_multi_config_generator(line.split("=")[1].strip())
-	return False
-
-def cmake_configure(dep:Dependency, build_dir:str, config:Optional[str], options:DopeOptions, root_settings:RootSettings):
+def cmake_configure(dep:Dependency, build_dir:str, config:str, options:DopeOptions, root_settings:RootSettings):
 	src_dir = make_dep_src_dir(dep, options.root, True)
 	expected_cmake_lists = os.path.join(src_dir, "CMakeLists.txt")
 	if not os.path.exists(expected_cmake_lists):
@@ -369,6 +344,7 @@ def cmake_configure(dep:Dependency, build_dir:str, config:Optional[str], options
 			raise FileNotFoundError(f"{expected_cmake_lists} not found. You may need to provide the 'src-subdir' option for this dependency, depending on the structure of the package archive.")
 		else:
 			raise FileNotFoundError(f"{expected_cmake_lists} not found.")
+	install_dir = make_install_dir(options.root, config)
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('-B')
@@ -376,10 +352,12 @@ def cmake_configure(dep:Dependency, build_dir:str, config:Optional[str], options
 	cmake_cmd.append('-S')
 	cmake_cmd.append(src_dir)
 	cmake_cmd.append('--install-prefix')
-	cmake_cmd.append(make_install_dir(options.root))
-	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={make_install_dir(options.root)}')
-	if config:
-		cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config}')
+	cmake_cmd.append(install_dir)
+	# Add all config-specific install directories to the prefix path so that
+	# dependencies can find each other during the build.
+	prefix_paths = [make_install_dir(options.root, c) for c in options.config]
+	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={";".join(prefix_paths)}')
+	cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config}')
 	cmake_cmd.extend(translate_special_vars(root_settings.cmake_options, options))
 	if options.fresh:
 		cmake_cmd.append('--fresh')
@@ -433,27 +411,16 @@ def cmake_clean_or_build_and_install(dep:Dependency, build_dir:str, config:str, 
 		cmake_install(dep, build_dir, config, options)
 
 def run_cmake(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
-	did_first_configure:bool = False
-	multi_config:bool = False
-	multi_config_build_dir:str = None
+	# We always configure/build/install each config separately, even if the
+	# generator supports multi-config. This is because we use config-specific
+	# CMAKE_INSTALL_INCLUDEDIR and CMAKE_INSTALL_LIBDIR to avoid overwriting
+	# config-dependent headers (e.g. config.h) when installing multiple configs.
 	for config in options.config:
-		should_configure = not (multi_config and did_first_configure)
 		build_dir = make_dep_build_dir(dep, config, options.root)
-		if should_configure:
-			dep_print_prefix = make_dep_print_prefix(dep, options)
-			print(f"{green(dep_print_prefix)} Configure...", end="", flush=True)
-			cmake_configure(dep, build_dir, config, options, root_settings)
-			if not did_first_configure:
-				multi_config           = is_multi_config(dep, config, options)
-				multi_config_build_dir = build_dir
-				if multi_config:
-					print(f'\r{green(dep_print_prefix)} {cyan("Multi-Config")} Configure')
-				else:
-					print(f'\r{green(dep_print_prefix)} {cyan(config)} Configure')
-			else:
-				print(f'\r{green(dep_print_prefix)} {cyan(config)} Configure')
-		cmake_clean_or_build_and_install(dep, multi_config_build_dir if multi_config else build_dir, config, options)
-		did_first_configure = True
+		dep_print_prefix = make_dep_print_prefix(dep, options)
+		print(f"{green(dep_print_prefix)} {cyan(config)} Configure")
+		cmake_configure(dep, build_dir, config, options, root_settings)
+		cmake_clean_or_build_and_install(dep, build_dir, config, options)
 
 def run_script(dep:Dependency, options:DopeOptions):
 	script_path = make_dep_script_path(dep, options.assets)
@@ -482,15 +449,16 @@ def install_dep(dep:Dependency, options:DopeOptions, root_settings:RootSettings)
 	elif dep.build_type == "py":
 		run_script(dep, options)
 
-def all_files_exist(files: list[str], options:DopeOptions):
+def all_files_exist(files: list[str], install_dir:str):
 	for file in files:
-		if not os.path.exists(os.path.join(make_install_dir(options.root), file)):
+		if not os.path.exists(os.path.join(install_dir, file)):
 			return False
 	return True
 
-def have_package(dep:Dependency, options:DopeOptions):
+def have_package_in_config(dep:Dependency, config:str, options:DopeOptions):
+	install_dir = make_install_dir(options.root, config)
 	if dep.installed_files:
-		if all_files_exist(dep.installed_files, options):
+		if all_files_exist(dep.installed_files, install_dir):
 			return True
 	# NOTE: i'm aware that CMake has a --find-package option but apparently
 	# its usage is not recommended.
@@ -508,9 +476,16 @@ def have_package(dep:Dependency, options:DopeOptions):
 	cmake_cmd.append(pkg_check_dir)
 	cmake_cmd.append('-S')
 	cmake_cmd.append(pkg_check_dir)
-	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={make_install_dir(options.root)}')
+	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={install_dir}')
 	result = run(cmake_cmd, shell=False, verbose=options.verbose, check=False)
 	return result.returncode == 0
+
+def have_package(dep:Dependency, options:DopeOptions):
+	"""Check if package is installed in all requested configs."""
+	for config in options.config:
+		if not have_package_in_config(dep, config, options):
+			return False
+	return True
 
 def make_name_list_for_subdope(dep:Dependency, names:list[str], all:bool):
 	if all:
@@ -743,13 +718,6 @@ def main():
 		root=args.root,
 		verbose=args.verbose
 	)
-	if args.nuke:
-		print(f'{green(make_print_prefix(options))} {yellow(f"Nuking install directory {cyan(make_install_dir(options.root))}...")}')
-		install_dir = make_install_dir(options.root)
-		nuked_dir   = make_nuked_dir(options.root)
-		if os.path.exists(nuked_dir):
-			shutil.rmtree(nuked_dir)
-		shutil.move(install_dir, nuked_dir)
 	root_settings = get_root_settings(options)
 	if deps is None:
 		print(f'{green(make_print_prefix(options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
