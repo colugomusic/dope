@@ -663,6 +663,7 @@ def copy_settings_from_cwd_dope_if_needed(options:DopeOptions, cwd:str):
 	
 	cwd_dope_settings = os.path.join(cwd, "dope", SETTINGS_YML)
 	if os.path.exists(cwd_dope_settings):
+		os.makedirs(options.root, exist_ok=True)
 		shutil.copy(cwd_dope_settings, settings_file)
 		print(yellow(f"WARNING: {SETTINGS_YML} was not found in {options.root}"))
 		print(yellow(f"So I have copied {SETTINGS_YML} from {cwd_dope_settings} to {settings_file}."))
