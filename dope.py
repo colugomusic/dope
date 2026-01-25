@@ -652,7 +652,28 @@ def settings_from_dict(settings:dict):
 	settings = RootSettings(cmake_options = get_cmake_options_from_dict(settings))
 	return settings
 
-def get_root_settings(options:DopeOptions):
+def copy_settings_from_cwd_dope_if_needed(options:DopeOptions, cwd:str):
+	"""
+	If settings.yml doesn't exist in the root directory, check if it exists at
+	(cwd)/dope/settings.yml. If found, copy it to root and print a warning.
+	"""
+	settings_file = get_settings_file_path(options)
+	if os.path.exists(settings_file):
+		return  # Already exists, nothing to do
+	
+	cwd_dope_settings = os.path.join(cwd, "dope", SETTINGS_YML)
+	if os.path.exists(cwd_dope_settings):
+		shutil.copy(cwd_dope_settings, settings_file)
+		print(yellow(f"WARNING: {SETTINGS_YML} was not found in {options.root}"))
+		print(yellow(f"So I have copied {SETTINGS_YML} from {cwd_dope_settings} to {settings_file}."))
+		print(yellow(f"This won't happen again. This is the file your root is going to use from now on."))
+		print(yellow(f"Contents of {settings_file}:"))
+		with open(settings_file, "r") as f:
+			contents = f.read()
+		print(yellow(contents))
+
+def get_root_settings(options:DopeOptions, cwd:str):
+	copy_settings_from_cwd_dope_if_needed(options, cwd)
 	settings_file = get_settings_file_path(options)
 	settings_dict = read_settings_file(settings_file) if os.path.exists(settings_file) else None
 	return settings_from_dict(settings_dict) if settings_dict else RootSettings(cmake_options = [])
@@ -721,7 +742,7 @@ def main():
 		root=args.root,
 		verbose=args.verbose
 	)
-	root_settings = get_root_settings(options)
+	root_settings = get_root_settings(options, cwd)
 	if deps is None:
 		print(f'{green(make_print_prefix(options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
 		return
