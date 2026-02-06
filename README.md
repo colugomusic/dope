@@ -245,7 +245,7 @@ Can be given multiple times to reinstall specific dependencies. This is similar 
 `--reinstall *` will reinstall all dependencies.
 
 ### --track (name)
-Get the latest commit hash for the given dependency and update the `tag` field in `deps.yml`. If `--track` is given with no dependency name is specified after it, do this for all `track: true` dependencies.
+Get the latest commit hash for the given dependency and update the `tag` field in `deps.yml`. If `--track` is given with no dependency name specified after it, do this for all `track: true` dependencies.
 
 ## Referring to sub-dependencies
 Dope is only immediately aware of the dependencies specified in the `deps.yml` that it is currently processing. So if a dependency `foo` is also using dope, and specifies a sub-dependency `bar` then dope will not be aware of that until it gets around to processing `foo`.
