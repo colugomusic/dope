@@ -65,26 +65,23 @@ configs:
 macos:
   cmake-options:
     - -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+    - -DCMAKE_TOOLCHAIN_FILE=/Users/chris/dv/blockhead/toolchain-macos.cmake
   configs:
     x86-dbg:
       config: Debug
-      cmake-options:
-        - -DCMAKE_OSX_ARCHITECTURES=x86_64
+      arch: x86_64
     x86-rel:
       config: RelWithDebInfo
-      cmake-options:
-        - -DCMAKE_OSX_ARCHITECTURES=x86_64
+      arch: x86_64
     arm64-dbg:
       config: Debug
-      cmake-options:
-        - -DCMAKE_OSX_ARCHITECTURES=arm64
+      arch: arm64
     arm64-rel:
       config: RelWithDebInfo
-      cmake-options:
-        - -DCMAKE_OSX_ARCHITECTURES=arm64
+      arch: arm64
 ```
 
-Each config entry has a name (e.g. `dbg`, `x86-rel`) that will be used for the install prefix folder name (e.g. `(root)/install/dbg`). The `config` field specifies the CMake build type (Debug, Release, RelWithDebInfo, etc.). Optional per-config `cmake-options` will be passed to CMake when building dependencies for that config.
+Each config entry has a name (e.g. `dbg`, `x86-rel`) that will be used for the install prefix folder name (e.g. `(root)/install/dbg`). The `config` field specifies the CMake build type (Debug, Release, RelWithDebInfo, etc.). The optional `arch` field specifies the target architecture; on macOS this sets `CMAKE_OSX_ARCHITECTURES`. On other platforms it's ignored.
 
 The platform-specific sections are named `linux`, `macos`, and `windows`.
 

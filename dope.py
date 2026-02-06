@@ -52,7 +52,7 @@ class ConfigSpec:
 	"""A named configuration with associated cmake settings."""
 	name: str                    # e.g. "x86-dbg", used for install prefix folder name
 	config: str                  # cmake build type e.g. "Debug", "Release", "RelWithDebInfo"
-	cmake_options: list[str] = None  # additional cmake options for this config
+	arch: str = None             # architecture (on macOS, sets CMAKE_OSX_ARCHITECTURES)
 
 @dataclass
 class DopeOptions:
@@ -472,9 +472,9 @@ def cmake_configure(dep:Dependency, build_dir:str, config_spec:ConfigSpec, optio
 	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={";".join(prefix_paths)}')
 	cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config_spec.config}')
 	cmake_cmd.extend(translate_special_vars(root_settings.cmake_options, options))
-	# Config-spec-specific CMake options (from settings.yml)
-	if config_spec.cmake_options:
-		cmake_cmd.extend(translate_special_vars(config_spec.cmake_options, options))
+	# On macOS, set CMAKE_OSX_ARCHITECTURES if arch is specified
+	if sys.platform == "darwin" and config_spec.arch:
+		cmake_cmd.append(f'-DCMAKE_OSX_ARCHITECTURES={config_spec.arch}')
 	if options.fresh:
 		cmake_cmd.append('--fresh')
 	# Dependency-specific CMake options
@@ -780,8 +780,7 @@ def parse_configs_dict(configs_dict:dict) -> list[ConfigSpec]:
 	  configs:
 	    config-name:
 	      config: Debug
-	      cmake-options:
-	        - -DFOO=bar
+	      arch: x86_64  # optional, on macOS sets CMAKE_OSX_ARCHITECTURES
 	"""
 	if configs_dict is None:
 		return []
@@ -792,8 +791,8 @@ def parse_configs_dict(configs_dict:dict) -> list[ConfigSpec]:
 		config = props.get("config")
 		if not config:
 			raise ValueError(f"Config '{name}' is missing required 'config' field (cmake build type)")
-		cmake_options = props.get("cmake-options", None)
-		result.append(ConfigSpec(name=name, config=config, cmake_options=cmake_options))
+		arch = props.get("arch", None)
+		result.append(ConfigSpec(name=name, config=config, arch=arch))
 	return result
 
 def get_configs_from_dict(settings:dict) -> list[ConfigSpec]:
