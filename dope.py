@@ -61,6 +61,7 @@ class DopeOptions:
 	excludes: list[str]
 	root: str
 	track: list[str]
+	install_self: bool
 	verbose: bool
 
 @dataclass
@@ -201,6 +202,7 @@ def parse_args(cwd):
 	parser.add_argument('--reinstall', action='append', default=[], help='Reinstall a specific dependency, or "*" for all')
 	parser.add_argument('--track', action='append', default=[], help='Update tag to latest commit hash for a git dependency, or "*" for all with track=true')
 	parser.add_argument('--exclude', action='append', default=[], help='Exclude a specific dependency from being processed')
+	parser.add_argument('--install-self', action='store_true', help='Install all dependencies, then install the consumer project itself')
 	return parser.parse_args()
 
 def read_from_yaml(filepath:str):
@@ -936,6 +938,24 @@ def auto_track_deps_missing_tag(deps:list[Dependency], options:DopeOptions):
 					dep.tag = updated_dep.get('tag')
 					break
 
+def make_self_dependency(assets_dir:str) -> Dependency:
+	"""Create a Dependency object representing the consumer project itself.
+	The consumer project is the parent directory of the assets (dope) folder."""
+	consumer_dir = os.path.dirname(assets_dir)
+	project_name = os.path.basename(consumer_dir)
+	return Dependency(
+		name=project_name,
+		remote_path=consumer_dir,
+		build_type="cmake"
+	)
+
+def install_self(options:DopeOptions, root_settings:RootSettings):
+	"""Install the consumer project itself as a dependency."""
+	self_dep = make_self_dependency(options.assets)
+	print(f"{green(make_dep_print_prefix(self_dep, options))} Installing self...")
+	install_dep(self_dep, options, root_settings)
+	check_if_installation_worked(self_dep, options)
+
 def main():
 	colorama_init()
 	cwd           = os.getcwd()
@@ -957,6 +977,7 @@ def main():
 		excludes=args.exclude,
 		root=args.root,
 		track=args.track,
+		install_self=args.install_self,
 		verbose=args.verbose
 	)
 	root_settings = get_root_settings(options, cwd)
@@ -985,6 +1006,9 @@ def main():
 			find_and_install_these_deps(names, deps, options, root_settings)
 		else:
 			install_all_deps(deps, options, root_settings)
+		# Install the consumer project itself if requested
+		if options.install_self:
+			install_self(options, root_settings)
 	except Exception as e:
 		print(traceback.format_exc())
 		print(f'{red(make_print_prefix(options))} {red(f"Error: {e}")}')
