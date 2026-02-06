@@ -438,13 +438,17 @@ def get_source(dep:Dependency, options:DopeOptions, reacquire:bool):
 	if dep.add_src_files:
 		add_src_files(dep, options)
 
-def translate_special_vars(strings:list[str], options:DopeOptions):
+def translate_special_vars(strings:list[str], options:DopeOptions, config_spec:ConfigSpec=None):
+	result = []
 	for s in strings:
 		s = s.replace("__dope_root__",       options.root)
 		s = s.replace("__dope_on_linux__",   "ON" if sys.platform == "linux" else "OFF")
 		s = s.replace("__dope_on_macos__",   "ON" if sys.platform == "darwin" else "OFF")
 		s = s.replace("__dope_on_windows__", "ON" if sys.platform == "win32" else "OFF")
-	return strings
+		if config_spec and config_spec.arch:
+			s = s.replace("__dope_arch__", config_spec.arch)
+		result.append(s)
+	return result
 
 def make_config_string(config_spec:ConfigSpec):
 	return config_spec.name if config_spec else "Multi-Config"
@@ -468,7 +472,7 @@ def cmake_configure(dep:Dependency, build_dir:str, config_spec:ConfigSpec, optio
 	cmake_cmd.append(install_dir)
 	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={install_dir}')
 	cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config_spec.config}')
-	cmake_cmd.extend(translate_special_vars(root_settings.cmake_options, options))
+	cmake_cmd.extend(translate_special_vars(root_settings.cmake_options, options, config_spec))
 	# On macOS, set CMAKE_OSX_ARCHITECTURES if arch is specified
 	if sys.platform == "darwin" and config_spec.arch:
 		cmake_cmd.append(f'-DCMAKE_OSX_ARCHITECTURES={config_spec.arch}')
@@ -476,13 +480,13 @@ def cmake_configure(dep:Dependency, build_dir:str, config_spec:ConfigSpec, optio
 		cmake_cmd.append('--fresh')
 	# Dependency-specific CMake options
 	if dep.cmake_options:
-		cmake_cmd.extend(dep.cmake_options.split(" "))
+		cmake_cmd.extend(translate_special_vars(dep.cmake_options.split(" "), options, config_spec))
 	if sys.platform == "darwin" and dep.cmake_options_mac:
-		cmake_cmd.extend(dep.cmake_options_mac.split(" "))
+		cmake_cmd.extend(translate_special_vars(dep.cmake_options_mac.split(" "), options, config_spec))
 	elif sys.platform == "linux" and dep.cmake_options_lin:
-		cmake_cmd.extend(dep.cmake_options_lin.split(" "))
+		cmake_cmd.extend(translate_special_vars(dep.cmake_options_lin.split(" "), options, config_spec))
 	elif sys.platform == "win32" and dep.cmake_options_win:
-		cmake_cmd.extend(dep.cmake_options_win.split(" "))
+		cmake_cmd.extend(translate_special_vars(dep.cmake_options_win.split(" "), options, config_spec))
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
 def cmake_clean(dep:Dependency, build_dir:str, config_spec:ConfigSpec, options:DopeOptions):
