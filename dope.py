@@ -275,6 +275,18 @@ def save_installed_dep_meta(root:str, dep:Dependency, consumer_path:str):
 	meta[dep.name] = entry
 	write_meta_file(root, meta)
 
+def get_source_description(git:str=None, tag:str=None, url:str=None, path:str=None, remote_path:str=None) -> str:
+	"""Get a human-readable description of a source."""
+	if git:
+		return f"git '{git}' (tag: {tag})"
+	if url:
+		return f"url '{url}'"
+	if path:
+		return f"path '{path}'"
+	if remote_path:
+		return f"remote-path '{remote_path}'"
+	return "unknown source"
+
 def check_dep_source_mismatch(dep:Dependency, options:DopeOptions) -> str:
 	"""
 	Check if the dependency source matches what's in meta.yml.
@@ -284,21 +296,19 @@ def check_dep_source_mismatch(dep:Dependency, options:DopeOptions) -> str:
 	if installed is None:
 		return None  # Not installed yet, no mismatch possible
 	
-	# Check source type and values
-	if dep.git:
-		if installed.git != dep.git:
-			return f"git repository mismatch: installed from '{installed.git}', but '{dep.git}' specified"
-		if installed.tag != dep.tag:
-			return f"git tag mismatch: installed with tag '{installed.tag}', but tag '{dep.tag}' specified"
-	elif dep.url:
-		if installed.url != dep.url:
-			return f"url mismatch: installed from '{installed.url}', but '{dep.url}' specified"
-	elif dep.path:
-		if installed.path != dep.path:
-			return f"path mismatch: installed from '{installed.path}', but '{dep.path}' specified"
-	elif dep.remote_path:
-		if installed.remote_path != dep.remote_path:
-			return f"remote-path mismatch: installed from '{installed.remote_path}', but '{dep.remote_path}' specified"
+	# Check if current spec matches what was installed
+	matches = (
+		(dep.git == installed.git) and
+		(dep.tag == installed.tag) and
+		(dep.url == installed.url) and
+		(dep.path == installed.path) and
+		(dep.remote_path == installed.remote_path)
+	)
+	
+	if not matches:
+		installed_desc = get_source_description(installed.git, installed.tag, installed.url, installed.path, installed.remote_path)
+		wanted_desc = get_source_description(dep.git, dep.tag, dep.url, dep.path, dep.remote_path)
+		return f"installed from {installed_desc}, but {wanted_desc} specified"
 	
 	return None
 
@@ -679,7 +689,7 @@ def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSetti
 	if not reacquire:
 		mismatch = check_dep_source_mismatch(dep, options)
 		if mismatch:
-			raise ValueError(f"Dependency '{dep.name}' source mismatch: {mismatch}")
+			raise ValueError(f"Dependency '{dep.name}' in '{dep.spec_src}': {mismatch}")
 	
 	# If not in meta.yml yet, add it (even if already installed)
 	installed_meta = get_installed_dep_meta(options.root, dep.name)
@@ -910,9 +920,9 @@ def track_dependencies(deps:list[Dependency], options:DopeOptions):
 	Adds any updated dependencies to the reacquires list."""
 	for dep in deps:
 		if should_track_dep(dep, options):
-			track_one_dependency(dep, options)
-			# Always reacquire tracked deps to ensure local source matches the tag
-			if dep.name not in options.reacquires:
+			tag_changed = track_one_dependency(dep, options)
+			# Only reacquire if the tag actually changed
+			if tag_changed and dep.name not in options.reacquires:
 				options.reacquires.append(dep.name)
 				print(f"{green(make_dep_print_prefix(dep, options))} Added to reacquire list")
 
