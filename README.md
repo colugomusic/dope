@@ -57,13 +57,16 @@ cmake-options:
   - -DBUILD_SHARED_LIBS=OFF
   - -DCMAKE_DEBUG_POSTFIX=d
   - -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+configs:
+  - Debug
+  - RelWithDebInfo
 macos:
   - cmake-options:
     - -DCMAKE_OSX_ARCHITECTURES=arm64;x86_64
     - -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
 ```
 
-Everything in the settings file is optional but if you are building for both Debug and Release then you very likely want to remember `CMAKE_DEBUG_POSTFIX`.
+Everything in the settings file is optional, but `configs` is required if it is not specified as a command-line option.
 
 The platform-specific sections are named `linux`, `macos`, and `windows`.
 
@@ -73,7 +76,7 @@ In the root of your project, create the file `dope/deps.yml`:
 📦your project
  ┣ 📂dope
  ┃ ┗ 📜deps.yml
- ┃ ┗ 📜settings.yml (optional)
+ ┃ ┗ 📜settings.yml (optional. this will be copied into the root automatically if there is not already a settings.yml there)
 ```
 
 ## Example 📜deps.yml
