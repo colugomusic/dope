@@ -690,7 +690,13 @@ def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSetti
 	if not reacquire:
 		mismatch = check_dep_source_mismatch(dep, options)
 		if mismatch:
-			raise ValueError(f"Dependency '{dep.name}' in '{dep.spec_src}': {mismatch}")
+			# Warn about mismatch, but treat as installed if package is found
+			if have_package(dep, options):
+				print(f"{yellow(make_dep_print_prefix(dep, options))} WARNING: {mismatch}")
+				print(f"{green(make_dep_print_prefix(dep, options))} already installed (keeping existing)")
+				return
+			else:
+				raise ValueError(f"Dependency '{dep.name}' in '{dep.spec_src}': {mismatch}")
 	
 	# If not in meta.yml yet, add it (even if already installed)
 	installed_meta = get_installed_dep_meta(options.root, dep.name)
