@@ -60,7 +60,7 @@ class DopeOptions:
 	reinstall_all: bool
 	excludes: list[str]
 	root: str
-	track: list[str]
+	track: list[str]  # None if --track not used, [] if --track with no args (track all), or list of names
 	install_self: bool
 	verbose: bool
 
@@ -200,7 +200,7 @@ def parse_args(cwd):
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
 	parser.add_argument('--reacquire', action='append', default=[], help='Reacquire a specific dependency, or "*" for all')
 	parser.add_argument('--reinstall', action='append', default=[], help='Reinstall a specific dependency, or "*" for all')
-	parser.add_argument('--track', action='append', default=[], help='Update tag to latest commit hash for a git dependency, or "*" for all with track=true')
+	parser.add_argument('--track', nargs='*', help='Update tag to latest commit hash for git dependencies. Use without args for all with track=true, or specify names.')
 	parser.add_argument('--exclude', action='append', default=[], help='Exclude a specific dependency from being processed')
 	parser.add_argument('--install-self', action='store_true', help='Install all dependencies, then install the consumer project itself')
 	return parser.parse_args()
@@ -628,10 +628,9 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 		for exclude in options.excludes:
 			cmd.append('--exclude')
 			cmd.append(exclude)
-		# Forward --track * if the parent dep was tracked
+		# Forward --track if the parent dep was tracked (no args = track all with track=true)
 		if should_track_dep(dep, options):
 			cmd.append('--track')
-			cmd.append('*')
 		run(cmd, shell=False, verbose=True)
 
 def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
@@ -795,7 +794,7 @@ def to_dep(x:dict, deps_yml:str) -> Dependency:
 	track = x["track"] if "track" in x else False
 	# tag is required for git deps, unless track=True (in which case tag will be auto-filled)
 	if git is not None and tag is None and not track:
-		raise ValueError(f"Dependency '{x['name']}' has 'git' specified but is missing required 'tag' field (or set track: true)")
+		raise ValueError(f"Dependency '{x['name']}' in '{deps_yml}' has 'git' specified but is missing required 'tag' field (or set track: true)")
 	return Dependency(
 		name=x["name"],
 		url=x["url"] if "url" in x else None,
@@ -894,13 +893,15 @@ def track_one_dependency(dep:Dependency, options:DopeOptions) -> bool:
 
 def should_track_dep(dep:Dependency, options:DopeOptions) -> bool:
 	"""Determine if a dependency should be tracked based on options.track list."""
+	if options.track is None:
+		return False
 	if not dep.git:
 		return False
 	# If specific dep name is in track list, track it regardless of track field
 	if dep.name in options.track:
 		return True
-	# If '*' is in track list, track all git deps with track=True
-	if "*" in options.track and dep.track:
+	# If track list is empty (--track with no args), track all git deps with track=True
+	if len(options.track) == 0 and dep.track:
 		return True
 	return False
 
@@ -966,7 +967,7 @@ def main():
 		reinstall_all=False,
 		excludes=args.exclude,
 		root=args.root,
-		track=args.track,
+		track=args.track,  # None if --track not used, [] if --track with no args, or list of names
 		install_self=args.install_self,
 		verbose=args.verbose
 	)
@@ -983,7 +984,7 @@ def main():
 	try:
 		# Auto-track any git deps with track=True that are missing a tag
 		auto_track_deps_missing_tag(deps, options)
-		if options.track:
+		if options.track is not None:
 			track_dependencies(deps, options)
 			# Note: subdependency tracking is handled by run_dope_if_present during install,
 			# which forwards the --track flag. We can't track subdeps here because the source
