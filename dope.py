@@ -52,7 +52,7 @@ class ConfigSpec:
 	"""A named configuration with associated cmake settings."""
 	name: str                    # e.g. "x86-dbg", used for install prefix folder name
 	config: str                  # cmake build type e.g. "Debug", "Release", "RelWithDebInfo"
-	arch: str = None             # architecture (on macOS, sets CMAKE_OSX_ARCHITECTURES)
+	arch: list[str] = None       # architecture(s) (on macOS, sets CMAKE_OSX_ARCHITECTURES; can be single or multiple)
 
 @dataclass
 class DopeOptions:
@@ -446,7 +446,9 @@ def translate_special_vars(strings:list[str], options:DopeOptions, config_spec:C
 		s = s.replace("__dope_on_macos__",   "ON" if sys.platform == "darwin" else "OFF")
 		s = s.replace("__dope_on_windows__", "ON" if sys.platform == "win32" else "OFF")
 		if config_spec and config_spec.arch:
-			s = s.replace("__dope_arch__", config_spec.arch)
+			# Join arch list with semicolons for CMake compatibility
+			arch_str = ";".join(config_spec.arch)
+			s = s.replace("__dope_arch__", arch_str)
 		result.append(s)
 	return result
 
@@ -475,7 +477,8 @@ def cmake_configure(dep:Dependency, build_dir:str, config_spec:ConfigSpec, optio
 	cmake_cmd.extend(translate_special_vars(root_settings.cmake_options, options, config_spec))
 	# On macOS, set CMAKE_OSX_ARCHITECTURES if arch is specified
 	if sys.platform == "darwin" and config_spec.arch:
-		cmake_cmd.append(f'-DCMAKE_OSX_ARCHITECTURES={config_spec.arch}')
+		arch_str = ";".join(config_spec.arch)
+		cmake_cmd.append(f'-DCMAKE_OSX_ARCHITECTURES={arch_str}')
 	if options.fresh:
 		cmake_cmd.append('--fresh')
 	# Dependency-specific CMake options
@@ -782,7 +785,7 @@ def parse_configs_dict(configs_dict:dict) -> list[ConfigSpec]:
 	  configs:
 	    config-name:
 	      config: Debug
-	      arch: x86_64  # optional, on macOS sets CMAKE_OSX_ARCHITECTURES
+	      arch: x86_64  # optional, can be string or list; on macOS sets CMAKE_OSX_ARCHITECTURES
 	"""
 	if configs_dict is None:
 		return []
@@ -793,7 +796,14 @@ def parse_configs_dict(configs_dict:dict) -> list[ConfigSpec]:
 		config = props.get("config")
 		if not config:
 			raise ValueError(f"Config '{name}' is missing required 'config' field (cmake build type)")
-		arch = props.get("arch", None)
+		arch_value = props.get("arch", None)
+		# Normalize arch to a list (or None)
+		if arch_value is None:
+			arch = None
+		elif isinstance(arch_value, list):
+			arch = arch_value
+		else:
+			arch = [arch_value]  # Single string -> list with one element
 		result.append(ConfigSpec(name=name, config=config, arch=arch))
 	return result
 
