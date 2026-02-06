@@ -478,8 +478,6 @@ def cmake_configure(dep:Dependency, build_dir:str, config_spec:ConfigSpec, optio
 		cmake_cmd.append(f'-DCMAKE_OSX_ARCHITECTURES={config_spec.arch}')
 	if options.fresh:
 		cmake_cmd.append('--fresh')
-	# Don't let dependencies fail the build due to warnings
-	cmake_cmd.append('--compile-no-warning-as-error')
 	# Dependency-specific CMake options
 	if dep.cmake_options:
 		cmake_cmd.extend(translate_special_vars(dep.cmake_options.split(" "), options, config_spec))
