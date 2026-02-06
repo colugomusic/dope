@@ -508,6 +508,7 @@ def cmake_build(dep:Dependency, build_dir:str, config_spec:ConfigSpec, options:D
 	cmake_cmd.append(build_dir)
 	cmake_cmd.append('--config')
 	cmake_cmd.append(config_spec.config)
+	cmake_cmd.append('--compile-no-warning-as-error')
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
 def cmake_install(dep:Dependency, build_dir:str, config_spec:ConfigSpec, options:DopeOptions):
