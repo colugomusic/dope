@@ -466,10 +466,7 @@ def cmake_configure(dep:Dependency, build_dir:str, config_spec:ConfigSpec, optio
 	cmake_cmd.append(src_dir)
 	cmake_cmd.append('--install-prefix')
 	cmake_cmd.append(install_dir)
-	# Add all config-specific install directories to the prefix path so that
-	# dependencies can find each other during the build.
-	prefix_paths = [make_install_dir(options.root, c.name) for c in options.configs]
-	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={";".join(prefix_paths)}')
+	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={install_dir}')
 	cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config_spec.config}')
 	cmake_cmd.extend(translate_special_vars(root_settings.cmake_options, options))
 	# On macOS, set CMAKE_OSX_ARCHITECTURES if arch is specified
