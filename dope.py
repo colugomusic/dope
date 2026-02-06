@@ -168,8 +168,8 @@ def make_dep_script_path(dep:Dependency, assets_dir):
 def make_dep_src_add_dir(dep:Dependency, assets_dir):
 	return os.path.join(assets_dir, dep.name, "src")
 
-def make_pkg_check_dir(options:DopeOptions):
-	return os.path.join(options.root, "pkg-check")
+def make_pkg_check_dir(options:DopeOptions, config_name:str):
+	return os.path.join(options.root, "pkg-check", config_name)
 
 def run(cmd, verbose:bool, shell:bool=True, check:bool=True):
 	if verbose:
@@ -582,7 +582,7 @@ def have_package_in_config(dep:Dependency, config_spec:ConfigSpec, options:DopeO
 			return True
 	# NOTE: i'm aware that CMake has a --find-package option but apparently
 	# its usage is not recommended.
-	pkg_check_dir = make_pkg_check_dir(options)
+	pkg_check_dir = make_pkg_check_dir(options, config_spec.name)
 	os.makedirs(pkg_check_dir, exist_ok=True)
 	find_package_name = dep.find_package_name or dep.name
 	cmake_lists = os.path.join(pkg_check_dir, "CMakeLists.txt")
