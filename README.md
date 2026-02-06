@@ -9,8 +9,8 @@ This is a C++ dependency installer.
 - Dope will call itself recursively when processing dependencies which also use dope for their sub-dependencies.
 - Dependencies can be downloaded from package archives, or cloned using git, or copied from some other local path on your computer.
 - There is no centralized package repository or community of package maintainers. There are no "recipes". There are no packages. This is not a package manager.
-- You have to use your brain to manually resolve version conflicts. We assume that if something during the build tries to use a version of a dependency which is incompatible with the one installed, then it will tell you about it.
-- There is no additional meta-data stored about the state of your dependencies such as which ones are installed and which ones aren't.
+- Some additional metadata is stored about the source of each installed dependency. The source is something like "it was downloaded from this zip file URL" or "it was cloned from this git repository with this commit hash".
+- If you try to install a dependency from a source that differs from the one that is already installed then dope will simply print a warning. It is your responsibility to manually resolve the mismatch.
 - Dependencies are considered to be "installed" if `find_package(dependency_name REQUIRED CONFIG)` succeeds.
 - `find_package(dependency_name REQUIRED CONFIG)` is checked automatically, once before processing a dependency, to skip it if it's already installed, and once again after installing the dependency, to check if it installed successfully.
 - Only Windows, macOS and Linux are considered.
@@ -30,10 +30,11 @@ Dope requires a "root". This is a folder on your computer which will have the fo
  ┣ 📂install
  ┣ 📂pkg
  ┣ 📂src
+ ┗ 📜meta.yml
  ┗ 📜settings.yml
 ```
 
-The folders are generated automatically. 📜settings.yml needs to be added by you.
+The folders and 📜meta.yml are generated automatically. 📜settings.yml can be added by you, or it will be copied automatically from `./dope/settings.yml` (relative to the root of your project.)
 
 You can have as many roots as you like. You can re-use the same root for different projects if you want.
 
@@ -72,6 +73,7 @@ In the root of your project, create the file `dope/deps.yml`:
 📦your project
  ┣ 📂dope
  ┃ ┗ 📜deps.yml
+ ┃ ┗ 📜settings.yml (optional)
 ```
 
 ## Example 📜deps.yml
@@ -81,9 +83,11 @@ This is a stripped down example from my own project which shows some various way
 ```yml
 - name:                ez
   git:                 https://github.com/colugomusic/ez.git
+  track:               true
 
 - name:                ads
   git:                 https://github.com/colugomusic/ads.git
+  track:               true
 
 - name:                minizip-ng
   url:                 https://github.com/zlib-ng/minizip-ng/archive/refs/tags/4.0.10.zip
@@ -142,7 +146,10 @@ You can give dependencies any name you want, but this is also the name that will
 Source will be downloaded from the internet and extracted into `root/src/(dependency name)`. It's assumed that the downloaded file is an archive.
 
 ### git
-Source will be cloned from the remote git repository.
+Source will be cloned from the remote git repository. If `tag` is not set then `track` must be set to `true`.
+
+### track
+Only for git dependencies. You can use the `--track` command-line option to automatically update the `tag` field to the latest commit available from the remote repository.
 
 ### path
 Source will be copied from the specified location on your computer to `root/src/(dependency name)`
@@ -212,10 +219,13 @@ Passes `--target clean` to CMake dependencies, and `--clean` to non-CMake depend
 Forwards `--fresh` to CMake dependencies.
 
 ### --config
-Can be given multiple times to specify configs to install. Defaults to `--config Debug --config Release`
+Can be given multiple times to specify configs to install. If not used then `configs` must be specified in `settings.yml`.
 
 ### -1/--dep (name)
 Can be given multiple times to install specific dependencies.
+
+### --install-self
+Installs all dependencies and then installs the project itself, as if it is a dependency, to the dope root.
 
 ### --reacquire (name)
 Can be given multiple times to reacquire specific dependencies (zip files will be redownloaded, git repositories will be re-pulled, etc.)
@@ -230,6 +240,9 @@ For `remote-path` dependencies, equivalent to `--reinstall`
 Can be given multiple times to reinstall specific dependencies. This is similar to `--dep` except it skips the initial `find_package()` check when processing the dependency and acts as if the check failed.
 
 `--reinstall *` will reinstall all dependencies.
+
+### --track (name)
+Get the latest commit hash for the given dependency and update the `tag` field in `deps.yml`. If `--track` is given with no dependency name is specified after it, do this for all `track: true` dependencies.
 
 ## Referring to sub-dependencies
 Dope is only immediately aware of the dependencies specified in the `deps.yml` that it is currently processing. So if a dependency `foo` is also using dope, and specifies a sub-dependency `bar` then dope will not be aware of that until it gets around to processing `foo`.
