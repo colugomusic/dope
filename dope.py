@@ -19,6 +19,7 @@ import wget
 
 DEPS_YML     = "deps.yml"
 SETTINGS_YML = "settings.yml"
+META_YML     = "meta.yml"
 
 ERR_MSG_INSTALL_SUCCEEDED_BUT_PACKAGE_NOT_FOUND = (
 	"Installation apparently succeeded but the package still cannot be found using CMake's find_package(). "
@@ -66,6 +67,17 @@ class DopeOptions:
 @dataclass
 class RootSettings:
 	cmake_options: list[str]
+
+@dataclass
+class InstalledDepMeta:
+	"""Metadata about an installed dependency stored in meta.yml"""
+	name: str
+	consumer: str  # Path to the project that installed this dependency
+	url: str = None
+	git: str = None
+	tag: str = None
+	path: str = None
+	remote_path: str = None
 
 def make_print_prefix(options:DopeOptions):
 	return f'{options.project_name}'
@@ -214,6 +226,81 @@ def read_deps_file(path):
 	if not os.path.exists(path):
 		raise FileNotFoundError(f"{path} not found. Did you remember to set the --assets argument?")
 	return read_from_yaml(path)
+
+def get_meta_file_path(root:str):
+	return os.path.join(root, META_YML)
+
+def read_meta_file(root:str) -> dict:
+	"""Read meta.yml from root, returning empty dict if not exists."""
+	meta_path = get_meta_file_path(root)
+	if not os.path.exists(meta_path):
+		return {}
+	return read_from_yaml(meta_path) or {}
+
+def write_meta_file(root:str, meta:dict):
+	"""Write meta.yml to root."""
+	meta_path = get_meta_file_path(root)
+	write_to_yaml(meta, meta_path)
+
+def get_installed_dep_meta(root:str, dep_name:str) -> InstalledDepMeta:
+	"""Get metadata for an installed dependency, or None if not found."""
+	meta = read_meta_file(root)
+	if dep_name not in meta:
+		return None
+	entry = meta[dep_name]
+	return InstalledDepMeta(
+		name=dep_name,
+		consumer=entry.get('consumer'),
+		url=entry.get('url'),
+		git=entry.get('git'),
+		tag=entry.get('tag'),
+		path=entry.get('path'),
+		remote_path=entry.get('remote-path')
+	)
+
+def save_installed_dep_meta(root:str, dep:Dependency, consumer_path:str):
+	"""Save metadata for an installed dependency."""
+	meta = read_meta_file(root)
+	entry = {'consumer': consumer_path}
+	if dep.url:
+		entry['url'] = dep.url
+	if dep.git:
+		entry['git'] = dep.git
+	if dep.tag:
+		entry['tag'] = dep.tag
+	if dep.path:
+		entry['path'] = dep.path
+	if dep.remote_path:
+		entry['remote-path'] = dep.remote_path
+	meta[dep.name] = entry
+	write_meta_file(root, meta)
+
+def check_dep_source_mismatch(dep:Dependency, options:DopeOptions) -> str:
+	"""
+	Check if the dependency source matches what's in meta.yml.
+	Returns an error message if there's a mismatch, or None if OK.
+	"""
+	installed = get_installed_dep_meta(options.root, dep.name)
+	if installed is None:
+		return None  # Not installed yet, no mismatch possible
+	
+	# Check source type and values
+	if dep.git:
+		if installed.git != dep.git:
+			return f"git repository mismatch: installed from '{installed.git}', but '{dep.git}' specified"
+		if installed.tag != dep.tag:
+			return f"git tag mismatch: installed with tag '{installed.tag}', but tag '{dep.tag}' specified"
+	elif dep.url:
+		if installed.url != dep.url:
+			return f"url mismatch: installed from '{installed.url}', but '{dep.url}' specified"
+	elif dep.path:
+		if installed.path != dep.path:
+			return f"path mismatch: installed from '{installed.path}', but '{dep.path}' specified"
+	elif dep.remote_path:
+		if installed.remote_path != dep.remote_path:
+			return f"remote-path mismatch: installed from '{installed.remote_path}', but '{dep.remote_path}' specified"
+	
+	return None
 
 def unpack_into(dep:Dependency, filepath, target_dir, options:DopeOptions):
 	print(f"{green(make_dep_print_prefix(dep, options))} Unpacking {cyan(filepath)} into {cyan(target_dir)}")
@@ -592,6 +679,11 @@ def a_sub_dependency_needs_to_reacquire_or_reinstall(dep:Dependency, options:Dop
 	return False
 
 def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
+	# Check for source mismatch before anything else
+	mismatch = check_dep_source_mismatch(dep, options)
+	if mismatch:
+		raise ValueError(f"Dependency '{dep.name}' source mismatch: {mismatch}")
+	
 	reacquire = should_reacquire(dep, options)
 	reinstall = should_reinstall(dep, options)
 	this_dep_needs_reinstall = reinstall or not have_package(dep, options)
@@ -607,6 +699,8 @@ def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSetti
 	if this_dep_needs_reinstall:
 		install_dep(dep, options, root_settings)
 		check_if_installation_worked(dep, options)
+		# Save metadata about this installed dependency
+		save_installed_dep_meta(options.root, dep, options.assets)
 
 def is_deep_name(name:str):
 	return name.count("/") > 0
