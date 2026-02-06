@@ -51,24 +51,44 @@ Unextracted package archives downloaded from the internet.
 Source code of dependencies.
 
 ### 📜settings.yml
-A file containing build settings which will be used for building every dependency in the root. Example from my own project:
+A file containing build settings which will be used for building every dependency in the root. The `configs` field is required. Example:
 ```yml
 cmake-options:
   - -DBUILD_SHARED_LIBS=OFF
   - -DCMAKE_DEBUG_POSTFIX=d
   - -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 configs:
-  - Debug
-  - RelWithDebInfo
+  dbg:
+    config: Debug
+  rel:
+    config: RelWithDebInfo
 macos:
-  - cmake-options:
-    - -DCMAKE_OSX_ARCHITECTURES=arm64;x86_64
+  cmake-options:
     - -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+  configs:
+    x86-dbg:
+      config: Debug
+      cmake-options:
+        - -DCMAKE_OSX_ARCHITECTURES=x86_64
+    x86-rel:
+      config: RelWithDebInfo
+      cmake-options:
+        - -DCMAKE_OSX_ARCHITECTURES=x86_64
+    arm64-dbg:
+      config: Debug
+      cmake-options:
+        - -DCMAKE_OSX_ARCHITECTURES=arm64
+    arm64-rel:
+      config: RelWithDebInfo
+      cmake-options:
+        - -DCMAKE_OSX_ARCHITECTURES=arm64
 ```
 
-Everything in the settings file is optional, but `configs` is required if it is not specified as a command-line option.
+Each config entry has a name (e.g. `dbg`, `x86-rel`) that will be used for the install prefix folder name (e.g. `(root)/install/dbg`). The `config` field specifies the CMake build type (Debug, Release, RelWithDebInfo, etc.). Optional per-config `cmake-options` will be passed to CMake when building dependencies for that config.
 
 The platform-specific sections are named `linux`, `macos`, and `windows`.
+
+If a platform-specific section contains a `configs` field, it completely overrides the base `configs`.
 
 In the root of your project, create the file `dope/deps.yml`:
 
@@ -226,7 +246,7 @@ Passes `--target clean` to CMake dependencies, and `--clean` to non-CMake depend
 Forwards `--fresh` to CMake dependencies.
 
 ### --config
-Can be given multiple times to specify configs to install. If not used then `configs` must be specified in `settings.yml`.
+Can be given multiple times to specify which configs (by name) from `settings.yml` to install. If not used, all configs from `settings.yml` are installed. For example: `--config x86-dbg --config x86-rel`
 
 ### -1/--dep (name)
 Can be given multiple times to install specific dependencies.

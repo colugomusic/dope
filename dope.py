@@ -48,10 +48,17 @@ class Dependency:
 	spec_src: str = None
 
 @dataclass
+class ConfigSpec:
+	"""A named configuration with associated cmake settings."""
+	name: str                    # e.g. "x86-dbg", used for install prefix folder name
+	config: str                  # cmake build type e.g. "Debug", "Release", "RelWithDebInfo"
+	cmake_options: list[str] = None  # additional cmake options for this config
+
+@dataclass
 class DopeOptions:
 	assets: str
 	clean: bool
-	config: list[str]
+	configs: list[ConfigSpec]
 	fresh: bool
 	project_name: str
 	reacquires: list[str]
@@ -67,7 +74,7 @@ class DopeOptions:
 @dataclass
 class RootSettings:
 	cmake_options: list[str]
-	configs: list[str]
+	configs: list[ConfigSpec]
 
 @dataclass
 class InstalledDepMeta:
@@ -197,7 +204,7 @@ def parse_args(cwd):
 	parser.add_argument('-c', '--clean', action='store_true', help='Clean instead of build/install')
 	parser.add_argument('-a', '--assets', default=default_assets_path, help='Path to assets directory')
 	parser.add_argument('-f', '--fresh', action='store_true', help='Fresh build (clear CMake cache)')
-	parser.add_argument('--config', action='append', help='Configuration to install (default: Debug + Release)')
+	parser.add_argument('--config', action='append', help='Config name from settings.yml to install (can be used multiple times). If not specified, all configs from settings.yml are installed.')
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
 	parser.add_argument('--reacquire', action='append', default=[], help='Reacquire a specific dependency, or "*" for all')
 	parser.add_argument('--reinstall', action='append', default=[], help='Reinstall a specific dependency, or "*" for all')
@@ -439,10 +446,10 @@ def translate_special_vars(strings:list[str], options:DopeOptions):
 		s = s.replace("__dope_on_windows__", "ON" if sys.platform == "win32" else "OFF")
 	return strings
 
-def make_config_string(config:Optional[str]):
-	return config if config else "Multi-Config"
+def make_config_string(config_spec:ConfigSpec):
+	return config_spec.name if config_spec else "Multi-Config"
 
-def cmake_configure(dep:Dependency, build_dir:str, config:str, options:DopeOptions, root_settings:RootSettings):
+def cmake_configure(dep:Dependency, build_dir:str, config_spec:ConfigSpec, options:DopeOptions, root_settings:RootSettings):
 	src_dir = make_dep_src_dir(dep, options.root, True)
 	expected_cmake_lists = os.path.join(src_dir, "CMakeLists.txt")
 	if not os.path.exists(expected_cmake_lists):
@@ -450,7 +457,7 @@ def cmake_configure(dep:Dependency, build_dir:str, config:str, options:DopeOptio
 			raise FileNotFoundError(f"{expected_cmake_lists} not found. You may need to provide the 'src-subdir' option for this dependency, depending on the structure of the package archive.")
 		else:
 			raise FileNotFoundError(f"{expected_cmake_lists} not found.")
-	install_dir = make_install_dir(options.root, config)
+	install_dir = make_install_dir(options.root, config_spec.name)
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('-B')
@@ -461,10 +468,13 @@ def cmake_configure(dep:Dependency, build_dir:str, config:str, options:DopeOptio
 	cmake_cmd.append(install_dir)
 	# Add all config-specific install directories to the prefix path so that
 	# dependencies can find each other during the build.
-	prefix_paths = [make_install_dir(options.root, c) for c in options.config]
+	prefix_paths = [make_install_dir(options.root, c.name) for c in options.configs]
 	cmake_cmd.append(f'-DCMAKE_PREFIX_PATH={";".join(prefix_paths)}')
-	cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config}')
+	cmake_cmd.append(f'-DCMAKE_BUILD_TYPE={config_spec.config}')
 	cmake_cmd.extend(translate_special_vars(root_settings.cmake_options, options))
+	# Config-spec-specific CMake options (from settings.yml)
+	if config_spec.cmake_options:
+		cmake_cmd.extend(translate_special_vars(config_spec.cmake_options, options))
 	if options.fresh:
 		cmake_cmd.append('--fresh')
 	# Dependency-specific CMake options
@@ -478,55 +488,55 @@ def cmake_configure(dep:Dependency, build_dir:str, config:str, options:DopeOptio
 		cmake_cmd.extend(dep.cmake_options_win.split(" "))
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
-def cmake_clean(dep:Dependency, build_dir:str, config:str, options:DopeOptions):
-	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(make_config_string(config))} Clean")
+def cmake_clean(dep:Dependency, build_dir:str, config_spec:ConfigSpec, options:DopeOptions):
+	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(make_config_string(config_spec))} Clean")
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('--build')
 	cmake_cmd.append(build_dir)
 	cmake_cmd.append('--config')
-	cmake_cmd.append(config)
+	cmake_cmd.append(config_spec.config)
 	cmake_cmd.append('--target clean')
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
-def cmake_build(dep:Dependency, build_dir:str, config:str, options:DopeOptions):
-	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(make_config_string(config))} Build")
+def cmake_build(dep:Dependency, build_dir:str, config_spec:ConfigSpec, options:DopeOptions):
+	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(make_config_string(config_spec))} Build")
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('--build')
 	cmake_cmd.append(build_dir)
 	cmake_cmd.append('--config')
-	cmake_cmd.append(config)
+	cmake_cmd.append(config_spec.config)
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
-def cmake_install(dep:Dependency, build_dir:str, config:str, options:DopeOptions):
-	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(make_config_string(config))} Install")
+def cmake_install(dep:Dependency, build_dir:str, config_spec:ConfigSpec, options:DopeOptions):
+	print(f"{green(make_dep_print_prefix(dep, options))} {cyan(make_config_string(config_spec))} Install")
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('--install')
 	cmake_cmd.append(build_dir)
 	cmake_cmd.append('--config')
-	cmake_cmd.append(config)
+	cmake_cmd.append(config_spec.config)
 	run(cmake_cmd, shell=False, verbose=options.verbose)
 
-def cmake_clean_or_build_and_install(dep:Dependency, build_dir:str, config:str, options:DopeOptions):
+def cmake_clean_or_build_and_install(dep:Dependency, build_dir:str, config_spec:ConfigSpec, options:DopeOptions):
 	if options.clean:
-		cmake_clean(dep, build_dir, config, options)
+		cmake_clean(dep, build_dir, config_spec, options)
 	else:
-		cmake_build(dep, build_dir, config, options)
-		cmake_install(dep, build_dir, config, options)
+		cmake_build(dep, build_dir, config_spec, options)
+		cmake_install(dep, build_dir, config_spec, options)
 
 def run_cmake(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
 	# We always configure/build/install each config separately, even if the
 	# generator supports multi-config. This is because we use config-specific
 	# CMAKE_INSTALL_INCLUDEDIR and CMAKE_INSTALL_LIBDIR to avoid overwriting
 	# config-dependent headers (e.g. config.h) when installing multiple configs.
-	for config in options.config:
-		build_dir = make_dep_build_dir(dep, config, options.root)
+	for config_spec in options.configs:
+		build_dir = make_dep_build_dir(dep, config_spec.name, options.root)
 		dep_print_prefix = make_dep_print_prefix(dep, options)
-		print(f"{green(dep_print_prefix)} {cyan(config)} Configure")
-		cmake_configure(dep, build_dir, config, options, root_settings)
-		cmake_clean_or_build_and_install(dep, build_dir, config, options)
+		print(f"{green(dep_print_prefix)} {cyan(config_spec.name)} Configure")
+		cmake_configure(dep, build_dir, config_spec, options, root_settings)
+		cmake_clean_or_build_and_install(dep, build_dir, config_spec, options)
 
 def run_script(dep:Dependency, options:DopeOptions):
 	script_path = make_dep_script_path(dep, options.assets)
@@ -542,9 +552,9 @@ def run_script(dep:Dependency, options:DopeOptions):
 	cmd.append(options.assets)
 	if options.clean:
 		cmd.append('--clean')
-	for config in options.config:
+	for config_spec in options.configs:
 		cmd.append('--config')
-		cmd.append(config)
+		cmd.append(config_spec.name)
 	if options.verbose:
 		cmd.append('--verbose')
 	env = os.environ.copy()
@@ -564,8 +574,8 @@ def all_files_exist(files: list[str], install_dir:str):
 			return False
 	return True
 
-def have_package_in_config(dep:Dependency, config:str, options:DopeOptions):
-	install_dir = make_install_dir(options.root, config)
+def have_package_in_config(dep:Dependency, config_spec:ConfigSpec, options:DopeOptions):
+	install_dir = make_install_dir(options.root, config_spec.name)
 	if dep.installed_files:
 		if all_files_exist(dep.installed_files, install_dir):
 			return True
@@ -591,8 +601,8 @@ def have_package_in_config(dep:Dependency, config:str, options:DopeOptions):
 
 def have_package(dep:Dependency, options:DopeOptions):
 	"""Check if package is installed in all requested configs."""
-	for config in options.config:
-		if not have_package_in_config(dep, config, options):
+	for config_spec in options.configs:
+		if not have_package_in_config(dep, config_spec, options):
 			return False
 	return True
 
@@ -625,9 +635,9 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 			cmd.append('--fresh')
 		if options.verbose:
 			cmd.append('--verbose')
-		for config in options.config:
+		for config_spec in options.configs:
 			cmd.append('--config')
-			cmd.append(config)
+			cmd.append(config_spec.name)
 		reacquires = make_name_list_for_subdope(dep, options.reacquires, options.reacquire_all)
 		for reacq in reacquires:
 			cmd.append('--reacquire')
@@ -764,17 +774,39 @@ def get_cmake_options_from_dict(settings:dict):
 			cmake_options.extend(platform_settings["cmake-options"])
 	return cmake_options
 
-def get_configs_from_dict(settings:dict):
+def parse_configs_dict(configs_dict:dict) -> list[ConfigSpec]:
+	"""Parse a configs dictionary into a list of ConfigSpec objects.
+	Format expected:
+	  configs:
+	    config-name:
+	      config: Debug
+	      cmake-options:
+	        - -DFOO=bar
+	"""
+	if configs_dict is None:
+		return []
+	result = []
+	for name, props in configs_dict.items():
+		if props is None:
+			raise ValueError(f"Config '{name}' has no properties (missing 'config' field)")
+		config = props.get("config")
+		if not config:
+			raise ValueError(f"Config '{name}' is missing required 'config' field (cmake build type)")
+		cmake_options = props.get("cmake-options", None)
+		result.append(ConfigSpec(name=name, config=config, cmake_options=cmake_options))
+	return result
+
+def get_configs_from_dict(settings:dict) -> list[ConfigSpec]:
 	"""Get configs from settings, with platform-specific override."""
 	platform_str = get_platform_long_string()
 	# Check platform-specific first (overrides base)
 	if platform_str in settings:
 		platform_settings = settings[platform_str]
 		if "configs" in platform_settings:
-			return platform_settings["configs"]
+			return parse_configs_dict(platform_settings["configs"])
 	# Fall back to base configs
 	if "configs" in settings:
-		return settings["configs"]
+		return parse_configs_dict(settings["configs"])
 	return []
 
 def settings_from_dict(settings:dict):
@@ -976,18 +1008,29 @@ def main():
 	root_settings = settings_from_dict(settings_dict) if settings_dict else RootSettings(cmake_options=[], configs=[])
 	
 	try:
-		# Determine configs: command line > settings.yml > error
+		# configs is now mandatory in settings.yml
+		if not root_settings.configs:
+			raise ValueError("'configs' is missing from settings.yml. This field is now mandatory.")
+		
+		# Determine which configs to use: command line selects from settings.yml, or use all from settings.yml
 		if args.config:
-			configs = args.config
-		elif root_settings.configs:
-			configs = root_settings.configs
+			# --config specifies config names to select from settings.yml
+			selected_configs = []
+			available_names = {c.name: c for c in root_settings.configs}
+			for name in args.config:
+				if name not in available_names:
+					available = ", ".join(available_names.keys())
+					raise ValueError(f"Config '{name}' not found in settings.yml. Available configs: {available}")
+				selected_configs.append(available_names[name])
+			configs = selected_configs
 		else:
-			raise ValueError("No configs specified. Use --config or add 'configs' to settings.yml")
+			# Use all configs from settings.yml
+			configs = root_settings.configs
 		
 		options = DopeOptions(
 			assets=assets_dir,
 			clean=args.clean,
-			config=configs,
+			configs=configs,
 			fresh=args.fresh,
 			project_name=args.project_name,
 			reacquires=args.reacquire,
