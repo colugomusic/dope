@@ -204,6 +204,9 @@ If you want to run the command from somewhere else then you can explictly specif
 - `dope -r /path/to/your/dope/root -a /path/to/project/root`
 - `dope -r /path/to/your/dope/root -a /path/to/project/root/dope`
 
+If your project is itself an installable dependency (such as a library) that you want to install, you can do:
+`dope -r /path/to/your/dope/root --install-self`
+
 ## Arguments
 
 ### -r/--root (path)
