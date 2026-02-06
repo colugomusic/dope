@@ -589,7 +589,8 @@ def have_package_in_config(dep:Dependency, config_spec:ConfigSpec, options:DopeO
 	with open(cmake_lists, "w") as f:
 		f.write(f'cmake_minimum_required(VERSION 3.30)\n')
 		f.write(f'project(dope-package-find-test CXX)\n')
-		f.write(f'find_package({find_package_name} REQUIRED CONFIG)\n')
+		# NO_DEFAULT_PATH prevents finding system-installed packages
+		f.write(f'find_package({find_package_name} REQUIRED CONFIG NO_DEFAULT_PATH)\n')
 	cmake_cmd = []
 	cmake_cmd.append('cmake')
 	cmake_cmd.append('-B')
