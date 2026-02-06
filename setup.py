@@ -7,7 +7,7 @@ setup(
 	install_requires=[
 		"colorama",
 		"GitPython",
-		"pyaml",
+		"ruamel.yaml",
 		"wget",
 	],
 	entry_points={

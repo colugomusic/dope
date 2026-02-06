@@ -1,11 +1,12 @@
-from typing import Optional
 from colorama import Fore, Style
 from colorama import init as colorama_init
 from dataclasses import dataclass
 from git import Repo, GitCommandError
-from pathlib import Path
-from urllib.parse import urlparse
 from hashlib import md5
+from pathlib import Path
+from ruamel.yaml import YAML
+from typing import Optional
+from urllib.parse import urlparse
 import argparse
 import os
 import re
@@ -15,7 +16,6 @@ import subprocess
 import sys
 import traceback
 import wget
-import yaml
 
 DEPS_YML     = "deps.yml"
 SETTINGS_YML = "settings.yml"
@@ -194,12 +194,16 @@ def parse_args(cwd):
 	return parser.parse_args()
 
 def read_from_yaml(filepath:str):
+	ryaml = YAML()
 	with open(filepath, "r") as f:
-		return yaml.safe_load(f)
+		return ryaml.load(f)
 
-def write_to_yaml(dict:dict, filepath:str):
+def write_to_yaml(data:dict, filepath:str):
+	ryaml = YAML()
+	ryaml.preserve_quotes = True
+	ryaml.width = 4096
 	with open(filepath, "w") as f:
-		yaml.dump(dict, f)
+		ryaml.dump(data, f)
 
 def read_settings_file(path:str):
 	if not os.path.exists(path):
@@ -746,20 +750,31 @@ def get_latest_commit_hash(git_url:str) -> str:
 
 def update_tag_in_deps_file(deps_file:str, dep_name:str, new_tag:str):
 	"""Update the tag field for a specific dependency in the deps.yml file."""
-	with open(deps_file, 'r') as f:
-		content = f.read()
+	ryaml = YAML()
+	ryaml.preserve_quotes = True
+	ryaml.width = 4096
 	
-	# Parse the YAML to find the dependency and update it
-	deps_list = yaml.safe_load(content)
+	with open(deps_file, 'r') as f:
+		deps_list = ryaml.load(f)
+	
+	old_tag = None
 	for dep in deps_list:
 		if dep.get('name') == dep_name:
 			old_tag = dep.get('tag')
-			dep['tag'] = new_tag
+			if 'tag' in dep:
+				dep['tag'] = new_tag
+			else:
+				# Insert 'tag' directly after 'git'
+				keys = list(dep.keys())
+				if 'git' in keys:
+					git_idx = keys.index('git')
+					dep.insert(git_idx + 1, 'tag', new_tag)
+				else:
+					dep['tag'] = new_tag
 			break
 	
-	# Write back with preserved formatting as much as possible
 	with open(deps_file, 'w') as f:
-		yaml.dump(deps_list, f, default_flow_style=False, sort_keys=False)
+		ryaml.dump(deps_list, f)
 	
 	return old_tag
 
