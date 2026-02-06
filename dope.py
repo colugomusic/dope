@@ -67,6 +67,7 @@ class DopeOptions:
 @dataclass
 class RootSettings:
 	cmake_options: list[str]
+	configs: list[str]
 
 @dataclass
 class InstalledDepMeta:
@@ -746,9 +747,6 @@ def get_platform_long_string():
 		case _:
 			raise ValueError(f"Unsupported platform: {sys.platform}")
 
-def get_settings_file_path(options:DopeOptions):
-	return os.path.join(options.root, SETTINGS_YML)
-
 def get_cmake_options_from_dict(settings:dict):
 	cmake_options = []
 	platform_str = get_platform_long_string()
@@ -760,36 +758,24 @@ def get_cmake_options_from_dict(settings:dict):
 			cmake_options.extend(platform_settings["cmake-options"])
 	return cmake_options
 
+def get_configs_from_dict(settings:dict):
+	"""Get configs from settings, with platform-specific override."""
+	platform_str = get_platform_long_string()
+	# Check platform-specific first (overrides base)
+	if platform_str in settings:
+		platform_settings = settings[platform_str]
+		if "configs" in platform_settings:
+			return platform_settings["configs"]
+	# Fall back to base configs
+	if "configs" in settings:
+		return settings["configs"]
+	return []
+
 def settings_from_dict(settings:dict):
-	settings = RootSettings(cmake_options = get_cmake_options_from_dict(settings))
-	return settings
-
-def copy_settings_from_cwd_dope_if_needed(options:DopeOptions, cwd:str):
-	"""
-	If settings.yml doesn't exist in the root directory, check if it exists at
-	(cwd)/dope/settings.yml. If found, copy it to root and print a warning.
-	"""
-	settings_file = get_settings_file_path(options)
-	if os.path.exists(settings_file):
-		return  # Already exists, nothing to do
-	
-	cwd_dope_settings = os.path.join(cwd, "dope", SETTINGS_YML)
-	if os.path.exists(cwd_dope_settings):
-		os.makedirs(options.root, exist_ok=True)
-		shutil.copy(cwd_dope_settings, settings_file)
-		print(yellow(f"WARNING: {SETTINGS_YML} was not found in {options.root}"))
-		print(yellow(f"So I have copied {SETTINGS_YML} from {cwd_dope_settings} to {settings_file}."))
-		print(yellow(f"This won't happen again. This is the file your root is going to use from now on."))
-		print(yellow(f"Contents of {settings_file}:"))
-		with open(settings_file, "r") as f:
-			contents = f.read()
-		print(yellow(contents))
-
-def get_root_settings(options:DopeOptions, cwd:str):
-	copy_settings_from_cwd_dope_if_needed(options, cwd)
-	settings_file = get_settings_file_path(options)
-	settings_dict = read_settings_file(settings_file) if os.path.exists(settings_file) else None
-	return settings_from_dict(settings_dict) if settings_dict else RootSettings(cmake_options = [])
+	return RootSettings(
+		cmake_options=get_cmake_options_from_dict(settings),
+		configs=get_configs_from_dict(settings)
+	)
 
 def find_assets_dir(assets_arg:str):
 	if os.path.exists(os.path.join(assets_arg, DEPS_YML)):
@@ -946,7 +932,7 @@ def make_self_dependency(assets_dir:str) -> Dependency:
 	project_name = os.path.basename(consumer_dir)
 	return Dependency(
 		name=project_name,
-		remote_path=consumer_dir,
+		path=consumer_dir,
 		build_type="cmake"
 	)
 
@@ -965,52 +951,85 @@ def main():
 	deps_file     = os.path.join(assets_dir, DEPS_YML)
 	deps          = to_deps(read_deps_file(deps_file), deps_file)
 	names         = args.dep or []
-	options = DopeOptions(
-		assets=assets_dir,
-		clean=args.clean,
-		config=args.config or ["Debug", "Release"],
-		fresh=args.fresh,
-		project_name=args.project_name,
-		reacquires=args.reacquire,
-		reinstalls=args.reinstall,
-		reacquire_all=False,
-		reinstall_all=False,
-		excludes=args.exclude,
-		root=args.root,
-		track=args.track,  # None if --track not used, [] if --track with no args, or list of names
-		install_self=args.install_self,
-		verbose=args.verbose
-	)
-	root_settings = get_root_settings(options, cwd)
-	if deps is None:
-		print(f'{green(make_print_prefix(options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
-		return
-	if "*" in options.reacquires:
-		options.reacquires = [d.name for d in deps]
-		options.reacquire_all = True
-	if "*" in options.reinstalls:
-		options.reinstalls = [d.name for d in deps]
-		options.reinstall_all = True
+	
+	# Get root settings first (need root path for this)
+	settings_file = os.path.join(args.root, SETTINGS_YML)
+	# Copy settings from cwd/dope if needed
+	if not os.path.exists(settings_file):
+		cwd_dope_settings = os.path.join(cwd, "dope", SETTINGS_YML)
+		if os.path.exists(cwd_dope_settings):
+			os.makedirs(args.root, exist_ok=True)
+			shutil.copy(cwd_dope_settings, settings_file)
+			print(yellow(f"WARNING: {SETTINGS_YML} was not found in {args.root}"))
+			print(yellow(f"So I have copied {SETTINGS_YML} from {cwd_dope_settings} to {settings_file}."))
+			print(yellow(f"This won't happen again. This is the file your root is going to use from now on."))
+			with open(settings_file, "r") as f:
+				print(yellow(f.read()))
+	
+	settings_dict = read_settings_file(settings_file) if os.path.exists(settings_file) else None
+	root_settings = settings_from_dict(settings_dict) if settings_dict else RootSettings(cmake_options=[], configs=[])
+	
 	try:
-		# Auto-track any git deps with track=True that are missing a tag
-		auto_track_deps_missing_tag(deps, options)
-		if options.track is not None:
-			track_dependencies(deps, options)
-			# Note: subdependency tracking is handled by run_dope_if_present during install,
-			# which forwards the --track flag. We can't track subdeps here because the source
-			# may not have been pulled yet.
-		if len(names) + len(options.reacquires) + len(options.reinstalls) > 0:
-			names = merge_dep_lists(names, options.reinstalls, options.reacquires)
-			names = add_parents(names)
-			find_and_install_these_deps(names, deps, options, root_settings)
+		# Determine configs: command line > settings.yml > error
+		if args.config:
+			configs = args.config
+		elif root_settings.configs:
+			configs = root_settings.configs
 		else:
-			install_all_deps(deps, options, root_settings)
-		# Install the consumer project itself if requested
-		if options.install_self:
-			install_self(options, root_settings)
+			raise ValueError("No configs specified. Use --config or add 'configs' to settings.yml")
+		
+		options = DopeOptions(
+			assets=assets_dir,
+			clean=args.clean,
+			config=configs,
+			fresh=args.fresh,
+			project_name=args.project_name,
+			reacquires=args.reacquire,
+			reinstalls=args.reinstall,
+			reacquire_all=False,
+			reinstall_all=False,
+			excludes=args.exclude,
+			root=args.root,
+			track=args.track,  # None if --track not used, [] if --track with no args, or list of names
+			install_self=args.install_self,
+			verbose=args.verbose
+		)
+		try:
+			if deps is None:
+				print(f'{green(make_print_prefix(options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
+				return
+			if "*" in options.reacquires:
+				options.reacquires = [d.name for d in deps]
+				options.reacquire_all = True
+			if "*" in options.reinstalls:
+				options.reinstalls = [d.name for d in deps]
+				options.reinstall_all = True
+
+			# Auto-track any git deps with track=True that are missing a tag
+			auto_track_deps_missing_tag(deps, options)
+			if options.track is not None:
+				track_dependencies(deps, options)
+				# Note: subdependency tracking is handled by run_dope_if_present during install,
+				# which forwards the --track flag. We can't track subdeps here because the source
+				# may not have been pulled yet.
+			if len(names) + len(options.reacquires) + len(options.reinstalls) > 0:
+				names = merge_dep_lists(names, options.reinstalls, options.reacquires)
+				names = add_parents(names)
+				find_and_install_these_deps(names, deps, options, root_settings)
+			else:
+				install_all_deps(deps, options, root_settings)
+			# Install the consumer project itself if requested
+			if options.install_self:
+				install_self(options, root_settings)
+		except Exception as e:
+			if options.verbose:
+				print(traceback.format_exc())
+			print(f'{red(make_print_prefix(options))} {red(f"Error: {e}")}')
+			sys.exit(1)
 	except Exception as e:
-		print(traceback.format_exc())
-		print(f'{red(make_print_prefix(options))} {red(f"Error: {e}")}')
+		if args.verbose:
+			print(traceback.format_exc())
+		print(f'{red(f"Error: {e}")}')
 		sys.exit(1)
 
 if __name__ == "__main__":
