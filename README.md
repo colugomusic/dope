@@ -53,7 +53,7 @@ Source code of dependencies.
 ### 📜settings.yml
 A file containing build settings which will be used for building every dependency in the root. The `configs` field is required. Example:
 ```yml
-cmake-options:
+make-options:
   - -DBUILD_SHARED_LIBS=OFF
   - -DCMAKE_DEBUG_POSTFIX=d
   - -DCMAKE_POSITION_INDEPENDENT_CODE=ON
@@ -64,24 +64,22 @@ configs:
     config: RelWithDebInfo
 macos:
   cmake-options:
-    - -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+    - -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
     - -DCMAKE_TOOLCHAIN_FILE=/Users/chris/dv/blockhead/toolchain-macos.cmake
   configs:
-    x86-dbg:
+    dbg:
       config: Debug
-      arch: x86_64
-    x86-rel:
+      arch:
+        - arm64
+        - x86_64
+    rel:
       config: RelWithDebInfo
-      arch: x86_64
-    arm64-dbg:
-      config: Debug
-      arch: arm64
-    arm64-rel:
-      config: RelWithDebInfo
-      arch: arm64
+      arch:
+        - arm64
+        - x86_64
 ```
 
-Each config entry has a name (e.g. `dbg`, `x86-rel`) that will be used for the install prefix folder name (e.g. `(root)/install/dbg`). The `config` field specifies the CMake build type (Debug, Release, RelWithDebInfo, etc.). The optional `arch` field specifies the target architecture; on macOS this sets `CMAKE_OSX_ARCHITECTURES`. On other platforms it's ignored.
+Each config entry has a name (e.g. `dbg`, `rel`) that will be used for the install prefix folder name (e.g. `(root)/install/dbg`). The `config` field specifies the CMake build type (Debug, Release, RelWithDebInfo, etc.). The optional `arch` field specifies the target architectures; on macOS this sets `CMAKE_OSX_ARCHITECTURES`. On other platforms it's ignored.
 
 The platform-specific sections are named `linux`, `macos`, and `windows`.
 
