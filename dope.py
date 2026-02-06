@@ -338,15 +338,16 @@ def download_source_from_url(dep, options:DopeOptions, reacquire:bool):
 		if options.verbose:
 			print(f"{green(make_dep_print_prefix(dep, options))} Skipping download from {cyan(dep.url)} because it already exists in {cyan(unpack_dir)}")
 
-def reset_and_pull(dep:Dependency):
-		repo = Repo(dep.git)
+def reset_and_pull(dep:Dependency, clone_dir:str):
+		repo = Repo(clone_dir)
 		if repo.bare:
 			raise Exception("Bare repo, cannot reset")
 		repo.git.reset("--hard")
 		repo.git.clean("-fd")
 		repo.remotes.origin.fetch()
 		if dep.tag:
-			repo.git.reset("--hard", f"origin/{dep.tag}")
+			# Checkout the specific tag/commit hash
+			repo.git.checkout(dep.tag)
 		elif repo.head.is_detached:
 			repo.git.reset("--hard", "origin/HEAD")
 		else:
@@ -379,7 +380,7 @@ def clone_source_from_git(dep:Dependency, options:DopeOptions, reacquire:bool):
 		if os.path.exists(os.path.join(clone_dir, ".git")):
 			print(f'{green(make_dep_print_prefix(dep, options))} Pulling latest changes from {cyan(dep.git)}')
 			try:
-				reset_and_pull(clone_dir)
+				reset_and_pull(dep, clone_dir)
 			except (GitCommandError, Exception) as e:
 				nuke_and_reclone(dep, clone_dir)
 			return
@@ -617,16 +618,20 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 			cmd.append('--config')
 			cmd.append(config)
 		reacquires = make_name_list_for_subdope(dep, options.reacquires, options.reacquire_all)
-		for dep in reacquires:
+		for reacq in reacquires:
 			cmd.append('--reacquire')
-			cmd.append(dep)
+			cmd.append(reacq)
 		reinstalls = make_name_list_for_subdope(dep, options.reinstalls, options.reinstall_all)
-		for dep in reinstalls:
+		for reinst in reinstalls:
 			cmd.append('--reinstall')
-			cmd.append(dep)
-		for dep in options.excludes:
+			cmd.append(reinst)
+		for exclude in options.excludes:
 			cmd.append('--exclude')
-			cmd.append(dep)
+			cmd.append(exclude)
+		# Forward --track * if the parent dep was tracked
+		if should_track_dep(dep, options):
+			cmd.append('--track')
+			cmd.append('*')
 		run(cmd, shell=False, verbose=True)
 
 def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
@@ -669,17 +674,19 @@ def a_sub_dependency_needs_to_reacquire_or_reinstall(dep:Dependency, options:Dop
 	return False
 
 def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
-	# Check for source mismatch before anything else
-	mismatch = check_dep_source_mismatch(dep, options)
-	if mismatch:
-		raise ValueError(f"Dependency '{dep.name}' source mismatch: {mismatch}")
+	# Check for source mismatch before anything else (but skip if reacquiring, 
+	# since reacquire intentionally updates the source)
+	reacquire = should_reacquire(dep, options)
+	if not reacquire:
+		mismatch = check_dep_source_mismatch(dep, options)
+		if mismatch:
+			raise ValueError(f"Dependency '{dep.name}' source mismatch: {mismatch}")
 	
 	# If not in meta.yml yet, add it (even if already installed)
 	installed_meta = get_installed_dep_meta(options.root, dep.name)
 	if installed_meta is None:
 		save_installed_dep_meta(options.root, dep, options.assets)
 	
-	reacquire = should_reacquire(dep, options)
 	reinstall = should_reinstall(dep, options)
 	this_dep_needs_reinstall = reinstall or not have_package(dep, options)
 	a_sub_dep_needs_to_process = a_sub_dependency_needs_to_reacquire_or_reinstall(dep, options)
@@ -902,28 +909,11 @@ def track_dependencies(deps:list[Dependency], options:DopeOptions):
 	Adds any updated dependencies to the reacquires list."""
 	for dep in deps:
 		if should_track_dep(dep, options):
-			if track_one_dependency(dep, options):
-				# Tag was updated, add to reacquires
-				if dep.name not in options.reacquires:
-					options.reacquires.append(dep.name)
-
-def track_subdependencies(dep:Dependency, options:DopeOptions):
-	"""Run tracking on sub-dependencies of a git dependency."""
-	src_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
-	assets_dir = os.path.join(src_dir, "dope")
-	if os.path.exists(os.path.join(assets_dir, DEPS_YML)):
-		cmd = []
-		cmd.append(sys.executable)
-		cmd.append(os.path.abspath(__file__))
-		cmd.append('--assets')
-		cmd.append(assets_dir)
-		cmd.append('--root')
-		cmd.append(options.root)
-		cmd.append('--project-name')
-		cmd.append(dep.name)
-		cmd.append('--track')
-		cmd.append('*')
-		run(cmd, shell=False, verbose=True)
+			track_one_dependency(dep, options)
+			# Always reacquire tracked deps to ensure local source matches the tag
+			if dep.name not in options.reacquires:
+				options.reacquires.append(dep.name)
+				print(f"{green(make_dep_print_prefix(dep, options))} Added to reacquire list")
 
 def auto_track_deps_missing_tag(deps:list[Dependency], options:DopeOptions):
 	"""Auto-track git dependencies with track=True that are missing a tag."""
@@ -995,11 +985,9 @@ def main():
 		auto_track_deps_missing_tag(deps, options)
 		if options.track:
 			track_dependencies(deps, options)
-			# Also forward --track * to sub-dependencies of tracked git deps
-			for dep in deps:
-				if should_track_dep(dep, options):
-					track_subdependencies(dep, options)
-			# Continue to install any deps that were updated (now in reacquires)
+			# Note: subdependency tracking is handled by run_dope_if_present during install,
+			# which forwards the --track flag. We can't track subdeps here because the source
+			# may not have been pulled yet.
 		if len(names) + len(options.reacquires) + len(options.reinstalls) > 0:
 			names = merge_dep_lists(names, options.reinstalls, options.reacquires)
 			names = add_parents(names)
