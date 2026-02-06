@@ -58,7 +58,6 @@ class DopeOptions:
 	reinstalls: list[str]
 	reacquire_all: bool
 	reinstall_all: bool
-	reacquire_heads: bool
 	excludes: list[str]
 	root: str
 	track: list[str]
@@ -200,7 +199,6 @@ def parse_args(cwd):
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
 	parser.add_argument('--reacquire', action='append', default=[], help='Reacquire a specific dependency, or "*" for all')
 	parser.add_argument('--reinstall', action='append', default=[], help='Reinstall a specific dependency, or "*" for all')
-	parser.add_argument('--reacquire-heads', action='store_true', help='Reacquire any git dependency that has no specific tag')
 	parser.add_argument('--track', action='append', default=[], help='Update tag to latest commit hash for a git dependency, or "*" for all with track=true')
 	parser.add_argument('--exclude', action='append', default=[], help='Exclude a specific dependency from being processed')
 	return parser.parse_args()
@@ -627,8 +625,6 @@ def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootS
 		for dep in options.excludes:
 			cmd.append('--exclude')
 			cmd.append(dep)
-		if options.reacquire_heads:
-			cmd.append('--reacquire-heads')
 		run(cmd, shell=False, verbose=True)
 
 def merge_dep_lists(names:list[str], reinstall:list[str], reacquire:list[str]):
@@ -653,16 +649,8 @@ def is_dep_or_subdep(deep_name:str, name:str):
 		return True
 	return False
 
-def is_git_head_dependency(dep:Dependency):
-	"""Returns True if this is a git dependency without a specific tag (i.e., tracking HEAD)."""
-	return dep.git is not None and dep.tag is None
-
 def should_reacquire(dep:Dependency, options:DopeOptions):
-	if "*" in options.reacquires or dep.name in options.reacquires:
-		return True
-	if options.reacquire_heads and is_git_head_dependency(dep):
-		return True
-	return False
+	return "*" in options.reacquires or dep.name in options.reacquires
 
 def should_reinstall(dep:Dependency, options:DopeOptions):
 	return "*" in options.reinstalls or dep.name in options.reinstalls or should_reacquire(dep, options)
@@ -684,6 +672,11 @@ def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSetti
 	if mismatch:
 		raise ValueError(f"Dependency '{dep.name}' source mismatch: {mismatch}")
 	
+	# If not in meta.yml yet, add it (even if already installed)
+	installed_meta = get_installed_dep_meta(options.root, dep.name)
+	if installed_meta is None:
+		save_installed_dep_meta(options.root, dep, options.assets)
+	
 	reacquire = should_reacquire(dep, options)
 	reinstall = should_reinstall(dep, options)
 	this_dep_needs_reinstall = reinstall or not have_package(dep, options)
@@ -699,7 +692,7 @@ def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSetti
 	if this_dep_needs_reinstall:
 		install_dep(dep, options, root_settings)
 		check_if_installation_worked(dep, options)
-		# Save metadata about this installed dependency
+		# Save/update metadata about this installed dependency
 		save_installed_dep_meta(options.root, dep, options.assets)
 
 def is_deep_name(name:str):
@@ -872,18 +865,23 @@ def update_tag_in_deps_file(deps_file:str, dep_name:str, new_tag:str):
 	
 	return old_tag
 
-def track_one_dependency(dep:Dependency, options:DopeOptions):
-	"""Update the tag for a single git dependency with track=True to the latest commit hash."""
+def track_one_dependency(dep:Dependency, options:DopeOptions) -> bool:
+	"""Update the tag for a single git dependency with track=True to the latest commit hash.
+	Returns True if the tag was updated, False otherwise."""
 	print(f"{green(make_dep_print_prefix(dep, options))} Fetching latest commit hash from {cyan(dep.git)}")
 	try:
 		new_tag = get_latest_commit_hash(dep.git)
 		if new_tag == dep.tag:
 			print(f"{green(make_dep_print_prefix(dep, options))} Already at latest: {cyan(new_tag)}")
+			return False
 		else:
 			old_tag = update_tag_in_deps_file(dep.spec_src, dep.name, new_tag)
 			print(f"{green(make_dep_print_prefix(dep, options))} Updated tag: {cyan(old_tag)} -> {cyan(new_tag)}")
+			dep.tag = new_tag  # Update in-memory too
+			return True
 	except Exception as e:
 		print(f"{red(make_dep_print_prefix(dep, options))} Failed to track: {e}")
+		return False
 
 def should_track_dep(dep:Dependency, options:DopeOptions) -> bool:
 	"""Determine if a dependency should be tracked based on options.track list."""
@@ -898,10 +896,14 @@ def should_track_dep(dep:Dependency, options:DopeOptions) -> bool:
 	return False
 
 def track_dependencies(deps:list[Dependency], options:DopeOptions):
-	"""Update tags for git dependencies based on the track list."""
+	"""Update tags for git dependencies based on the track list.
+	Adds any updated dependencies to the reacquires list."""
 	for dep in deps:
 		if should_track_dep(dep, options):
-			track_one_dependency(dep, options)
+			if track_one_dependency(dep, options):
+				# Tag was updated, add to reacquires
+				if dep.name not in options.reacquires:
+					options.reacquires.append(dep.name)
 
 def track_subdependencies(dep:Dependency, options:DopeOptions):
 	"""Run tracking on sub-dependencies of a git dependency."""
@@ -952,7 +954,6 @@ def main():
 		reinstalls=args.reinstall,
 		reacquire_all=False,
 		reinstall_all=False,
-		reacquire_heads=args.reacquire_heads,
 		excludes=args.exclude,
 		root=args.root,
 		track=args.track,
@@ -977,7 +978,7 @@ def main():
 			for dep in deps:
 				if should_track_dep(dep, options):
 					track_subdependencies(dep, options)
-			return
+			# Continue to install any deps that were updated (now in reacquires)
 		if len(names) + len(options.reacquires) + len(options.reinstalls) > 0:
 			names = merge_dep_lists(names, options.reinstalls, options.reacquires)
 			names = add_parents(names)
