@@ -31,6 +31,7 @@ class Dependency:
 	url: str = None
 	git: str = None
 	tag: str = None
+	track: bool = False
 	path: str = None
 	remote_path: str = None
 	build_type: str = None
@@ -59,6 +60,7 @@ class DopeOptions:
 	reacquire_heads: bool
 	excludes: list[str]
 	root: str
+	track: list[str]
 	verbose: bool
 
 @dataclass
@@ -187,6 +189,7 @@ def parse_args(cwd):
 	parser.add_argument('--reacquire', action='append', default=[], help='Reacquire a specific dependency, or "*" for all')
 	parser.add_argument('--reinstall', action='append', default=[], help='Reinstall a specific dependency, or "*" for all')
 	parser.add_argument('--reacquire-heads', action='store_true', help='Reacquire any git dependency that has no specific tag')
+	parser.add_argument('--track', action='append', default=[], help='Update tag to latest commit hash for a git dependency, or "*" for all with track=true')
 	parser.add_argument('--exclude', action='append', default=[], help='Exclude a specific dependency from being processed')
 	return parser.parse_args()
 
@@ -687,11 +690,18 @@ def find_assets_dir(assets_arg:str):
 	raise FileNotFoundError(f"Assets directory not found in {assets_arg}")
 
 def to_dep(x:dict, deps_yml:str) -> Dependency:
+	git = x["git"] if "git" in x else None
+	tag = x["tag"] if "tag" in x else None
+	track = x["track"] if "track" in x else False
+	# tag is required for git deps, unless track=True (in which case tag will be auto-filled)
+	if git is not None and tag is None and not track:
+		raise ValueError(f"Dependency '{x['name']}' has 'git' specified but is missing required 'tag' field (or set track: true)")
 	return Dependency(
 		name=x["name"],
 		url=x["url"] if "url" in x else None,
-		git=x["git"] if "git" in x else None,
-		tag=x["tag"] if "tag" in x else None,
+		git=git,
+		tag=tag,
+		track=track,
 		path=x["path"] if "path" in x else None,
 		remote_path=x["remote-path"] if "remote-path" in x else None,
 		build_type=x["build-type"] if "build-type" in x else "cmake",
@@ -720,6 +730,101 @@ def add_parents(names:list[str]):
 	names.extend(parents)
 	return names
 
+def get_latest_commit_hash(git_url:str) -> str:
+	"""Get the latest commit hash from the default branch of a remote git repository."""
+	result = subprocess.run(
+		['git', 'ls-remote', git_url, 'HEAD'],
+		capture_output=True,
+		text=True,
+		check=True
+	)
+	# Output format is: "<hash>\tHEAD"
+	output = result.stdout.strip()
+	if output:
+		return output.split()[0]
+	raise ValueError(f"Could not get latest commit hash from {git_url}")
+
+def update_tag_in_deps_file(deps_file:str, dep_name:str, new_tag:str):
+	"""Update the tag field for a specific dependency in the deps.yml file."""
+	with open(deps_file, 'r') as f:
+		content = f.read()
+	
+	# Parse the YAML to find the dependency and update it
+	deps_list = yaml.safe_load(content)
+	for dep in deps_list:
+		if dep.get('name') == dep_name:
+			old_tag = dep.get('tag')
+			dep['tag'] = new_tag
+			break
+	
+	# Write back with preserved formatting as much as possible
+	with open(deps_file, 'w') as f:
+		yaml.dump(deps_list, f, default_flow_style=False, sort_keys=False)
+	
+	return old_tag
+
+def track_one_dependency(dep:Dependency, options:DopeOptions):
+	"""Update the tag for a single git dependency with track=True to the latest commit hash."""
+	print(f"{green(make_dep_print_prefix(dep, options))} Fetching latest commit hash from {cyan(dep.git)}")
+	try:
+		new_tag = get_latest_commit_hash(dep.git)
+		if new_tag == dep.tag:
+			print(f"{green(make_dep_print_prefix(dep, options))} Already at latest: {cyan(new_tag)}")
+		else:
+			old_tag = update_tag_in_deps_file(dep.spec_src, dep.name, new_tag)
+			print(f"{green(make_dep_print_prefix(dep, options))} Updated tag: {cyan(old_tag)} -> {cyan(new_tag)}")
+	except Exception as e:
+		print(f"{red(make_dep_print_prefix(dep, options))} Failed to track: {e}")
+
+def should_track_dep(dep:Dependency, options:DopeOptions) -> bool:
+	"""Determine if a dependency should be tracked based on options.track list."""
+	if not dep.git:
+		return False
+	# If specific dep name is in track list, track it regardless of track field
+	if dep.name in options.track:
+		return True
+	# If '*' is in track list, track all git deps with track=True
+	if "*" in options.track and dep.track:
+		return True
+	return False
+
+def track_dependencies(deps:list[Dependency], options:DopeOptions):
+	"""Update tags for git dependencies based on the track list."""
+	for dep in deps:
+		if should_track_dep(dep, options):
+			track_one_dependency(dep, options)
+
+def track_subdependencies(dep:Dependency, options:DopeOptions):
+	"""Run tracking on sub-dependencies of a git dependency."""
+	src_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
+	assets_dir = os.path.join(src_dir, "dope")
+	if os.path.exists(os.path.join(assets_dir, DEPS_YML)):
+		cmd = []
+		cmd.append(sys.executable)
+		cmd.append(os.path.abspath(__file__))
+		cmd.append('--assets')
+		cmd.append(assets_dir)
+		cmd.append('--root')
+		cmd.append(options.root)
+		cmd.append('--project-name')
+		cmd.append(dep.name)
+		cmd.append('--track')
+		cmd.append('*')
+		run(cmd, shell=False, verbose=True)
+
+def auto_track_deps_missing_tag(deps:list[Dependency], options:DopeOptions):
+	"""Auto-track git dependencies with track=True that are missing a tag."""
+	for dep in deps:
+		if dep.git and dep.track and dep.tag is None:
+			print(f"{green(make_dep_print_prefix(dep, options))} Auto-tracking (missing tag)")
+			track_one_dependency(dep, options)
+			# Reload the tag from the updated deps file
+			updated_deps_list = read_deps_file(dep.spec_src)
+			for updated_dep in updated_deps_list:
+				if updated_dep.get('name') == dep.name:
+					dep.tag = updated_dep.get('tag')
+					break
+
 def main():
 	colorama_init()
 	cwd           = os.getcwd()
@@ -741,6 +846,7 @@ def main():
 		reacquire_heads=args.reacquire_heads,
 		excludes=args.exclude,
 		root=args.root,
+		track=args.track,
 		verbose=args.verbose
 	)
 	root_settings = get_root_settings(options, cwd)
@@ -754,6 +860,15 @@ def main():
 		options.reinstalls = [d.name for d in deps]
 		options.reinstall_all = True
 	try:
+		# Auto-track any git deps with track=True that are missing a tag
+		auto_track_deps_missing_tag(deps, options)
+		if options.track:
+			track_dependencies(deps, options)
+			# Also forward --track * to sub-dependencies of tracked git deps
+			for dep in deps:
+				if should_track_dep(dep, options):
+					track_subdependencies(dep, options)
+			return
 		if len(names) + len(options.reacquires) + len(options.reinstalls) > 0:
 			names = merge_dep_lists(names, options.reinstalls, options.reacquires)
 			names = add_parents(names)
