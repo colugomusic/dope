@@ -725,10 +725,8 @@ def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSetti
 			else:
 				raise ValueError(f"Dependency '{dep.name}' in '{dep.spec_src}': {mismatch}")
 	
-	# If not in meta.yml yet, add it (even if already installed)
-	installed_meta = get_installed_dep_meta(options.root, dep.name)
-	if installed_meta is None:
-		save_installed_dep_meta(options.root, dep, options.assets)
+	# Save/update metadata about this dependency
+	save_installed_dep_meta(options.root, dep, options.assets)
 	
 	reinstall = should_reinstall(dep, options)
 	this_dep_needs_reinstall = reinstall or not have_package(dep, options)
