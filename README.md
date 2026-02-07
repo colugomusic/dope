@@ -53,7 +53,7 @@ Source code of dependencies.
 ### 📜settings.yml
 A file containing build settings which will be used for building every dependency in the root. The `configs` field is required. Example:
 ```yml
-make-options:
+cmake-options:
   - -DBUILD_SHARED_LIBS=OFF
   - -DCMAKE_DEBUG_POSTFIX=d
   - -DCMAKE_POSITION_INDEPENDENT_CODE=ON
