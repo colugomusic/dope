@@ -203,7 +203,7 @@ The script should accept these arguments which will be forwarded from the top-le
 ```python
 parser = argparse.ArgumentParser()
 parser.add_argument("--root", type=str, required=True)
-parser.add_argument("--assets", type=str, required=True)
+parser.add_argument("--project-dir", type=str, required=True)
 parser.add_argument("--clean", action="store_true")
 parser.add_argument("--verbose", action="store_true")
 args = parser.parse_args()
@@ -215,9 +215,8 @@ For an example, see https://github.com/colugomusic/dope-godot-cpp (which builds 
 Go to the root of your project and run
 `dope -r /path/to/your/dope/root`
 
-If you want to run the command from somewhere else then you can explictly specify the project path with either of:
-- `dope -r /path/to/your/dope/root -a /path/to/project/root`
-- `dope -r /path/to/your/dope/root -a /path/to/project/root/dope`
+If you want to run the command from somewhere else then you can explicitly specify the project path with:
+`dope -r /path/to/your/dope/root --project-dir /path/to/project/root`
 
 If your project is itself an installable dependency (such as a library) that you want to install, you can do:
 
@@ -228,8 +227,11 @@ If your project is itself an installable dependency (such as a library) that you
 ### -r/--root (path)
 Path to your root folder.
 
-### -a/--assets (path)
-Path to the "assets folder" which contains your `deps.yml`. If not specified, defaults to `(current working directory)/dope`
+### --project-dir (path)
+Path to the project directory. If not specified, defaults to the current working directory. The assets folder is assumed to be at `(project-dir)/dope`.
+
+### --deps-yml (path)
+Path to the deps.yml file. If not specified, defaults to `(project-dir)/dope/deps.yml`. This is mainly used internally for processing sub-dependencies.
 
 ### --verbose
 Basically prints everything that is happening. You will want this if a dependency installation is failing for some reason.
@@ -273,4 +275,4 @@ Therefore `--reacquire bar` or `--reinstall bar` will not work.
 
 However, you can refer to this dependency with the syntax `--reacquire foo/bar` or `--reinstall foo/bar`.
 
-Alternatively you can process foo's sub-dependencies directly with `dope -z /path/to/your/dope/root -a /path/to/foo --reinstall bar`
+Alternatively you can process foo's sub-dependencies directly with `dope -r /path/to/your/dope/root --project-dir /path/to/foo --reinstall bar`
