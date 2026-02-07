@@ -84,6 +84,7 @@ class InstalledDepMeta:
 	url: str = None
 	git: str = None
 	tag: str = None
+	track: bool = False  # Whether this git dep was installed with track=true
 	path: str = None
 	remote_path: str = None
 
@@ -262,6 +263,7 @@ def get_installed_dep_meta(root:str, dep_name:str) -> InstalledDepMeta:
 		url=entry.get('url'),
 		git=entry.get('git'),
 		tag=entry.get('tag'),
+		track=entry.get('track', False),
 		path=entry.get('path'),
 		remote_path=entry.get('remote-path')
 	)
@@ -276,6 +278,8 @@ def save_installed_dep_meta(root:str, dep:Dependency, consumer_path:str):
 		entry['git'] = dep.git
 	if dep.tag:
 		entry['tag'] = dep.tag
+	if dep.track:
+		entry['track'] = dep.track
 	if dep.path:
 		entry['path'] = dep.path
 	if dep.remote_path:
@@ -303,6 +307,14 @@ def check_dep_source_mismatch(dep:Dependency, options:DopeOptions) -> str:
 	installed = get_installed_dep_meta(options.root, dep.name)
 	if installed is None:
 		return None  # Not installed yet, no mismatch possible
+	
+	# Special case: if both the current dep and the installed dep are git deps
+	# with track=true, they're both intended to track HEAD, so no mismatch.
+	# The installed version (from the top-level project) takes precedence.
+	if dep.git and dep.track and installed.git and installed.track:
+		# Both are tracking HEAD - only require the git URL to match
+		if dep.git == installed.git:
+			return None
 	
 	# Check if current spec matches what was installed
 	matches = (
