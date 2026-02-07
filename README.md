@@ -79,7 +79,7 @@ macos:
         - x86_64
 ```
 
-Each config entry has a name (e.g. `dbg`, `rel`) that will be used for the install prefix folder name (e.g. `(root)/install/dbg`). The `config` field specifies the CMake build type (Debug, Release, RelWithDebInfo, etc.). The optional `arch` field specifies the target architectures; on macOS this sets `CMAKE_OSX_ARCHITECTURES`. On other platforms it's ignored.
+Each config entry has a name (e.g. `dbg`, `rel`) that will be used for the install prefix folder name (e.g. `(root)/install/dbg`). The `config` field specifies the CMake config name (Debug, Release, RelWithDebInfo, etc.). The optional `arch` field specifies the target architectures; on macOS this sets `CMAKE_OSX_ARCHITECTURES`. On other platforms it's ignored.
 
 The platform-specific sections are named `linux`, `macos`, and `windows`.
 
