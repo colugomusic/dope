@@ -56,7 +56,8 @@ class ConfigSpec:
 
 @dataclass
 class DopeOptions:
-	assets: str
+	project_dir: str  # Directory containing the project (with ./dope/ subfolder for assets)
+	deps_yml: str     # Path to deps.yml (can differ from project_dir/dope/deps.yml for sub-deps)
 	clean: bool
 	configs: list[ConfigSpec]
 	fresh: bool
@@ -84,7 +85,6 @@ class InstalledDepMeta:
 	url: str = None
 	git: str = None
 	tag: str = None
-	track: bool = False  # Whether this git dep was installed with track=true
 	path: str = None
 	remote_path: str = None
 
@@ -110,6 +110,14 @@ def make_src_dir(root):
 
 def make_pkg_dir(root):
 	return os.path.join(root, "pkg")
+
+def make_subdep_meta_dir(root:str, dep_name:str):
+	"""Get the local meta directory for a sub-dependency's deps.yml copy."""
+	return os.path.join(root, "meta", dep_name)
+
+def make_assets_dir(project_dir:str):
+	"""Get the assets directory (./dope/) for a project."""
+	return os.path.join(project_dir, "dope")
 
 def make_dep_build_dir(dep:Dependency, config:Optional[str], root):
 	return os.path.join(make_build_dir(config if config else "Multi-Config", root), dep.name)
@@ -197,16 +205,16 @@ def yellow(text):
 	return f"{Fore.YELLOW}{text}{Style.RESET_ALL}"
 
 def parse_args(cwd):
-	default_assets_path = cwd
 	parser = argparse.ArgumentParser(description='Build/Install dependencies')
 	parser.add_argument('-r', '--root', required=True, help='Where to build/install dependencies')
 	parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
 	parser.add_argument('-1', '--dep', action='append', help='Build/Install a specific dependency')
 	parser.add_argument('-c', '--clean', action='store_true', help='Clean instead of build/install')
-	parser.add_argument('-a', '--assets', default=default_assets_path, help='Path to assets directory')
 	parser.add_argument('-f', '--fresh', action='store_true', help='Fresh build (clear CMake cache)')
 	parser.add_argument('--config', action='append', help='Config name from settings.yml to install (can be used multiple times). If not specified, all configs from settings.yml are installed.')
 	parser.add_argument('--project-name', type=str, default="", help='Project name')
+	parser.add_argument('--project-dir', type=str, default=cwd, help='Project directory (default: current working directory)')
+	parser.add_argument('--deps-yml', type=str, default=None, help='Path to deps.yml (default: (project-dir)/dope/deps.yml)')
 	parser.add_argument('--reacquire', action='append', default=[], help='Reacquire a specific dependency, or "*" for all')
 	parser.add_argument('--reinstall', action='append', default=[], help='Reinstall a specific dependency, or "*" for all')
 	parser.add_argument('--track', nargs='*', help='Update tag to latest commit hash for git dependencies. Use without args for all with track=true, or specify names.')
@@ -228,12 +236,12 @@ def write_to_yaml(data:dict, filepath:str):
 
 def read_settings_file(path:str):
 	if not os.path.exists(path):
-		raise FileNotFoundError(f"{path} not found. Did you remember to set the --assets argument?")
+		raise FileNotFoundError(f"{path} not found")
 	return read_from_yaml(path)
 
 def read_deps_file(path):
 	if not os.path.exists(path):
-		raise FileNotFoundError(f"{path} not found. Did you remember to set the --assets argument?")
+		raise FileNotFoundError(f"{path} not found")
 	return read_from_yaml(path)
 
 def get_meta_file_path(root:str):
@@ -251,6 +259,19 @@ def write_meta_file(root:str, meta:dict):
 	meta_path = get_meta_file_path(root)
 	write_to_yaml(meta, meta_path)
 
+def copy_subdep_deps_yml(dep_name:str, src_deps_yml:str, root:str) -> str:
+	"""
+	Copy a sub-dependency's deps.yml to the local meta directory.
+	Returns the path to the local copy of deps.yml.
+	"""
+	local_meta_dir = make_subdep_meta_dir(root, dep_name)
+	os.makedirs(local_meta_dir, exist_ok=True)
+	local_deps_yml = os.path.join(local_meta_dir, DEPS_YML)
+	# Only copy if local copy doesn't exist yet
+	if not os.path.exists(local_deps_yml):
+		shutil.copy2(src_deps_yml, local_deps_yml)
+	return local_deps_yml
+
 def get_installed_dep_meta(root:str, dep_name:str) -> InstalledDepMeta:
 	"""Get metadata for an installed dependency, or None if not found."""
 	meta = read_meta_file(root)
@@ -263,7 +284,6 @@ def get_installed_dep_meta(root:str, dep_name:str) -> InstalledDepMeta:
 		url=entry.get('url'),
 		git=entry.get('git'),
 		tag=entry.get('tag'),
-		track=entry.get('track', False),
 		path=entry.get('path'),
 		remote_path=entry.get('remote-path')
 	)
@@ -278,8 +298,6 @@ def save_installed_dep_meta(root:str, dep:Dependency, consumer_path:str):
 		entry['git'] = dep.git
 	if dep.tag:
 		entry['tag'] = dep.tag
-	if dep.track:
-		entry['track'] = dep.track
 	if dep.path:
 		entry['path'] = dep.path
 	if dep.remote_path:
@@ -307,14 +325,6 @@ def check_dep_source_mismatch(dep:Dependency, options:DopeOptions) -> str:
 	installed = get_installed_dep_meta(options.root, dep.name)
 	if installed is None:
 		return None  # Not installed yet, no mismatch possible
-	
-	# Special case: if both the current dep and the installed dep are git deps
-	# with track=true, they're both intended to track HEAD, so no mismatch.
-	# The installed version (from the top-level project) takes precedence.
-	if dep.git and dep.track and installed.git and installed.track:
-		# Both are tracking HEAD - only require the git URL to match
-		if dep.git == installed.git:
-			return None
 	
 	# Check if current spec matches what was installed
 	matches = (
@@ -433,7 +443,7 @@ def copy_source_from_path(dep:Dependency, options:DopeOptions, reacquire:bool):
 			print(f"{green(make_dep_print_prefix(dep, options))} Skipping copy from {cyan(dep.path)} because it already exists in {cyan(copy_dir)}")
 
 def add_src_files(dep:Dependency, options:DopeOptions):
-	src_add_dir = make_dep_src_add_dir(dep, options.assets)
+	src_add_dir = make_dep_src_add_dir(dep, make_assets_dir(options.project_dir))
 	src_dst_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
 	for file in os.listdir(src_add_dir):
 		dst_file = os.path.join(src_dst_dir, file)
@@ -555,17 +565,18 @@ def run_cmake(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
 		cmake_clean_or_build_and_install(dep, build_dir, config_spec, options)
 
 def run_script(dep:Dependency, options:DopeOptions):
-	script_path = make_dep_script_path(dep, options.assets)
+	assets_dir = make_assets_dir(options.project_dir)
+	script_path = make_dep_script_path(dep, assets_dir)
 	if not os.path.exists(script_path):
-		raise FileNotFoundError(f"{script_path} not found. Did you remember to set the --assets argument?")
+		raise FileNotFoundError(f"{script_path} not found")
 	print(f"{green(make_dep_print_prefix(dep, options))} Running script {cyan(script_path)}")
 	cmd = []
 	cmd.append('python')
 	cmd.append(script_path)
 	cmd.append('--root')
 	cmd.append(options.root)
-	cmd.append('--assets')
-	cmd.append(options.assets)
+	cmd.append('--project-dir')
+	cmd.append(options.project_dir)
 	if options.clean:
 		cmd.append('--clean')
 	for config_spec in options.configs:
@@ -635,13 +646,18 @@ def make_name_list_for_subdope(dep:Dependency, names:list[str], all:bool):
 
 def run_dope_if_present(dep:Dependency, options:DopeOptions, root_settings:RootSettings):
 	src_dir = make_dep_src_dir(dep, options.root, dep.build_type == "cmake")
-	assets_dir = os.path.join(src_dir, "dope")
-	if os.path.exists(os.path.join(assets_dir, DEPS_YML)):
+	src_assets_dir = os.path.join(src_dir, "dope")
+	src_deps_yml = os.path.join(src_assets_dir, DEPS_YML)
+	if os.path.exists(src_deps_yml):
+		# Copy deps.yml to local meta directory so we can update tags for tracked deps
+		local_deps_yml = copy_subdep_deps_yml(dep.name, src_deps_yml, options.root)
 		cmd = []
 		cmd.append(sys.executable)
 		cmd.append(os.path.abspath(__file__))
-		cmd.append('--assets')
-		cmd.append(assets_dir)
+		cmd.append('--project-dir')
+		cmd.append(src_dir)
+		cmd.append('--deps-yml')
+		cmd.append(local_deps_yml)
 		cmd.append('--root')
 		cmd.append(options.root)
 		cmd.append('--project-name')
@@ -726,7 +742,7 @@ def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSetti
 				raise ValueError(f"Dependency '{dep.name}' in '{dep.spec_src}': {mismatch}")
 	
 	# Save/update metadata about this dependency
-	save_installed_dep_meta(options.root, dep, options.assets)
+	save_installed_dep_meta(options.root, dep, options.project_dir)
 	
 	reinstall = should_reinstall(dep, options)
 	this_dep_needs_reinstall = reinstall or not have_package(dep, options)
@@ -743,7 +759,7 @@ def install_one_dep(dep:Dependency, options:DopeOptions, root_settings:RootSetti
 		install_dep(dep, options, root_settings)
 		check_if_installation_worked(dep, options)
 		# Save/update metadata about this installed dependency
-		save_installed_dep_meta(options.root, dep, options.assets)
+		save_installed_dep_meta(options.root, dep, options.project_dir)
 
 def is_deep_name(name:str):
 	return name.count("/") > 0
@@ -836,12 +852,16 @@ def settings_from_dict(settings:dict):
 		configs=get_configs_from_dict(settings)
 	)
 
-def find_assets_dir(assets_arg:str):
-	if os.path.exists(os.path.join(assets_arg, DEPS_YML)):
-		return assets_arg
-	if os.path.exists(os.path.join(assets_arg, "dope", DEPS_YML)):
-		return os.path.join(assets_arg, "dope")
-	raise FileNotFoundError(f"Assets directory not found in {assets_arg}")
+def get_deps_yml_path(project_dir:str, deps_yml_arg:str=None) -> str:
+	"""Get the path to deps.yml, either from explicit argument or default location."""
+	if deps_yml_arg:
+		if not os.path.exists(deps_yml_arg):
+			raise FileNotFoundError(f"{deps_yml_arg} not found")
+		return deps_yml_arg
+	default_path = os.path.join(project_dir, "dope", DEPS_YML)
+	if not os.path.exists(default_path):
+		raise FileNotFoundError(f"{default_path} not found")
+	return default_path
 
 def to_dep(x:dict, deps_yml:str) -> Dependency:
 	git = x["git"] if "git" in x else None
@@ -997,7 +1017,7 @@ def make_self_dependency(assets_dir:str) -> Dependency:
 
 def install_self(options:DopeOptions, root_settings:RootSettings):
 	"""Install the consumer project itself as a dependency."""
-	self_dep = make_self_dependency(options.assets)
+	self_dep = make_self_dependency(make_assets_dir(options.project_dir))
 	print(f"{green(make_dep_print_prefix(self_dep, options))} Installing self...")
 	install_dep(self_dep, options, root_settings)
 	check_if_installation_worked(self_dep, options)
@@ -1006,21 +1026,21 @@ def main():
 	colorama_init()
 	cwd           = os.getcwd()
 	args          = parse_args(cwd)
-	assets_dir    = find_assets_dir(args.assets)
-	deps_file     = os.path.join(assets_dir, DEPS_YML)
-	deps          = to_deps(read_deps_file(deps_file), deps_file)
+	project_dir   = args.project_dir
+	deps_yml      = get_deps_yml_path(project_dir, args.deps_yml)
+	deps          = to_deps(read_deps_file(deps_yml), deps_yml)
 	names         = args.dep or []
 	
 	# Get root settings first (need root path for this)
 	settings_file = os.path.join(args.root, SETTINGS_YML)
-	# Copy settings from cwd/dope if needed
+	# Copy settings from project_dir/dope if needed
 	if not os.path.exists(settings_file):
-		cwd_dope_settings = os.path.join(cwd, "dope", SETTINGS_YML)
-		if os.path.exists(cwd_dope_settings):
+		project_dope_settings = os.path.join(project_dir, "dope", SETTINGS_YML)
+		if os.path.exists(project_dope_settings):
 			os.makedirs(args.root, exist_ok=True)
-			shutil.copy(cwd_dope_settings, settings_file)
+			shutil.copy(project_dope_settings, settings_file)
 			print(yellow(f"WARNING: {SETTINGS_YML} was not found in {args.root}"))
-			print(yellow(f"So I have copied {SETTINGS_YML} from {cwd_dope_settings} to {settings_file}."))
+			print(yellow(f"So I have copied {SETTINGS_YML} from {project_dope_settings} to {settings_file}."))
 			print(yellow(f"This won't happen again. This is the file your root is going to use from now on."))
 			with open(settings_file, "r") as f:
 				print(yellow(f.read()))
@@ -1049,7 +1069,8 @@ def main():
 			configs = root_settings.configs
 		
 		options = DopeOptions(
-			assets=assets_dir,
+			project_dir=project_dir,
+			deps_yml=deps_yml,
 			clean=args.clean,
 			configs=configs,
 			fresh=args.fresh,
@@ -1066,7 +1087,7 @@ def main():
 		)
 		try:
 			if deps is None:
-				print(f'{green(make_print_prefix(options))} {yellow(f"No dependencies found in {cyan(deps_file)}")}')
+				print(f'{green(make_print_prefix(options))} {yellow(f"No dependencies found in {cyan(deps_yml)}")}')
 				return
 			if "*" in options.reacquires:
 				options.reacquires = [d.name for d in deps]
