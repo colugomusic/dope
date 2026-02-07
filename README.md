@@ -141,6 +141,7 @@ This is a stripped down example from my own project which shows some various way
 - name:                memory
   url:                 https://github.com/foonathan/memory/archive/refs/tags/v0.7-4.zip
   cmake-options:       -DFOONATHAN_MEMORY_BUILD_EXAMPLES=OFF -DFOONATHAN_MEMORY_BUILD_TESTS=OFF -DFOONATHAN_MEMORY_BUILD_TOOLS=OFF
+  cmake-options-mac:   -DCMAKE_CXX_FLAGS=-Wno-error=deprecated-literal-operator
   find-package-name:   foonathan_memory
 
 - name:                expected
