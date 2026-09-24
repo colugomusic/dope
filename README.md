@@ -1,3 +1,5 @@
+NOTE this is now superceded by [dip](https://github.com/colugomusic/dip)
+
 # dope is not a package manager
 
 This is a C++ dependency installer.
